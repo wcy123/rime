@@ -461,9 +461,19 @@ more examples,
 ;;  2 (2 . 2))
 ```
 
-## `:recur` - Self-Updating Variables
+## `:recur` - State Variables That Persist Across Loop Rounds
 
-The `:recur` clause creates variables that automatically update themselves as the loop repeats. Unlike normal loop variables (`:for`), `:recur` variables can depend on their own previous values.
+The `:recur` clause creates variables that **persist and accumulate state** as the loop runs. 
+
+**Key difference from `:for`:**
+- **`:for` variables** are bound to an iteration sequence - they reset for each new sequence
+- **`:recur` variables** accumulate across ALL rounds - they remember and build on previous values
+
+This enables patterns impossible with `:for` alone:
+- **Fibonacci**: track two previous values (F[n-1], F[n]) across all rounds
+- **Running totals**: accumulate sums, products, or counts
+- **Sliding windows**: remember the previous element
+- **Recursive traversal**: combine with `:name` to restart the loop with updated state
 
 ### Syntax
 
