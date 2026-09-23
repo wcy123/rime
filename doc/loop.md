@@ -461,28 +461,155 @@ more examples,
 ;;  2 (2 . 2))
 ```
 
-## `:recur` clauses
+## `:recur` - Recurrence Relations
 
-Very similiar to `do` in scheme.
+The `:recur` clause enables you to maintain state that evolves across iterations using recurrence relations. It's similar to Scheme's `do` form but integrates naturally with loop's iteration constructs.
+
+### Syntax
 
 ```scheme
-:recur <var> := <value> :then <step>
+:recur <var> := <init-value> :then <next-value-expr>
 ```
 
-it expands to
+- `<var>` - Variable name that holds the evolving state
+- `<init-value>` - Initial value before the first iteration
+- `<next-value-expr>` - Expression to compute the next value (can reference the current iteration's variables)
 
-```
-(let <recur-name> ((<var> <value>))
-   (<recur-name) <step>)
-```
+### How It Works
 
-To calculate fibonacci
+Each `:recur` clause creates a variable that:
+1. Starts with `<init-value>` before any iteration
+2. Updates to `<next-value-expr>` at the end of each iteration
+3. Can reference other iteration variables and other `:recur` variables
+
+Multiple `:recur` clauses can be used together, and they can reference each other (evaluation order follows declaration order).
+
+### Example 1: Fibonacci Sequence
+
+Computing Fibonacci numbers requires tracking two previous values:
+
 ```scheme
 (loop :repeat 10
-      :recur x0 := 0 :then x
-      :recur x := 1 :then (fx+ x0 x)
+      :recur x0 := 0 :then x      ; previous value: starts at 0, then becomes current x
+      :recur x := 1 :then (fx+ x0 x)  ; current value: starts at 1, then becomes sum
       :collect x)
 ;; => (1 1 2 3 5 8 13 21 34 55)
+```
+
+**Explanation:**
+- `x0` tracks the previous Fibonacci number (F[n-1])
+- `x` tracks the current Fibonacci number (F[n])
+- Each iteration: `x0` becomes old `x`, and `x` becomes `x0 + x`
+- We collect `x` to build the sequence
+
+**Step-by-step execution:**
+```
+Initial:      x0=0,  x=1    → collect 1
+Iteration 1:  x0=1,  x=1    → collect 1
+Iteration 2:  x0=1,  x=2    → collect 2
+Iteration 3:  x0=2,  x=3    → collect 3
+Iteration 4:  x0=3,  x=5    → collect 5
+...
+```
+
+### Example 2: Factorial
+
+Computing factorial requires accumulating a product:
+
+```scheme
+(loop :for i :from 1 :to 5
+      :recur result := 1 :then (fx* result i)
+      :finally result)
+;; => 120
+```
+
+**Explanation:**
+- `result` accumulates the product: 1 × 1 × 2 × 3 × 4 × 5 = 120
+- Initial value is 1 (multiplicative identity)
+- Each iteration multiplies `result` by the current `i`
+
+### Example 3: Running Sum
+
+Creating a list of cumulative sums:
+
+```scheme
+(loop :for i :from 1 :to 5
+      :recur sum := 0 :then (fx+ sum i)
+      :collect sum)
+;; => (0 1 3 6 10)
+```
+
+**Explanation:**
+- We collect the sum **before** it's updated
+- Iteration 1: sum=0, then update to 0+1=1
+- Iteration 2: sum=1, then update to 1+2=3
+- Iteration 3: sum=3, then update to 3+3=6
+- etc.
+
+### Example 4: Powers of 2
+
+Generating exponential sequences:
+
+```scheme
+(loop :repeat 8
+      :recur power := 1 :then (fx* power 2)
+      :collect power)
+;; => (1 2 4 8 16 32 64 128)
+```
+
+**Explanation:**
+- Start with `power=1`
+- Each iteration doubles: 1 → 2 → 4 → 8 → 16 → ...
+
+### Example 5: Sliding Window (Tracking Previous Value)
+
+Pairing each element with its predecessor:
+
+```scheme
+(loop :for i :in '(10 20 30 40 50)
+      :recur prev := #f :then i
+      :collect (cons prev i))
+;; => ((#f . 10) (10 . 20) (20 . 30) (30 . 40) (40 . 50))
+```
+
+**Explanation:**
+- `prev` starts as `#f` (no previous element yet)
+- Each iteration: `prev` becomes the previous iteration's `i`
+- Creates pairs showing the transition from one element to the next
+
+### When to Use `:recur`
+
+Use `:recur` when you need to:
+- **Compute recurrence relations** (Fibonacci, factorial, etc.)
+- **Track state across iterations** (running totals, sliding windows)
+- **Generate sequences** where each value depends on previous values
+- **Accumulate results** incrementally (when `:count`/`:collect` alone isn't enough)
+
+### Comparison with Other Features
+
+| Feature | Use Case | Example |
+|---------|----------|---------|
+| `:recur` | State that evolves based on previous values | Fibonacci, running sum |
+| `:count :into` | Simple accumulation with custom increment | Weighted counting |
+| `:with :=` | Loop-invariant values (computed once) | Constants, pre-computed values |
+| `:initially` | One-time setup code before loop starts | Initialize external state |
+
+### Technical Details
+
+The `:recur` clause expands to a named `let` binding:
+
+```scheme
+;; This loop:
+(loop :repeat 3
+      :recur x := 0 :then (fx+ x 1)
+      :collect x)
+
+;; Expands roughly to:
+(let recur-loop ([x 0])
+  (if (>= iteration-count 3)
+      result
+      (let ([collected x])
+        (recur-loop (fx+ x 1)))))  ; Update x for next iteration
 ```
 ## named loop
 
