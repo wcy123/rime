@@ -777,56 +777,83 @@ column.
 (count-occurrences 'd '(a b c))      ; => 0
 ```
 
-# Practical Examples Using Universal Scheme Idiom
+# More Practical Examples
 
-All examples verified with actual output from Chez Scheme 10.4.1.
+## Simple list building - Use `:collect`
 
-## Universal Pattern: cons + accumulator + reverse
+For simple list building, use `:collect` - it's clearer and more efficient:
 
-Build lists with `cons` (O(1)), reverse at end if order matters.
-This works everywhere: recursive functions, loop macros, DAG traversal.
-
-## list-indices - Find all indices of element
+### list-indices - Find all indices of element
 
 ```scheme
 (define (list-indices x lst)
-  (loop :initially acc := '()
-        :for item :in lst
+  (loop :for item :in lst
         :for index :from 0
         :when (equal? x item)
-        :do (set! acc (cons index acc))
-        :finally (reverse acc)))
+        :collect index))
 
 (list-indices 'a '(a b a c a))  ; => (0 2 4)
 (list-indices 'd '(a b c))      ; => ()
 ```
 
-## my-filter - Filter using cons pattern
+### my-filter - Filter using `:collect`
 
 ```scheme
 (define (my-filter pred lst)
-  (loop :initially acc := '()
-        :for item :in lst
+  (loop :for item :in lst
         :when (pred item)
-        :do (set! acc (cons item acc))
-        :finally (reverse acc)))
+        :collect item))
 
 (my-filter even? '(1 2 3 4 5 6))  ; => (2 4 6)
 ```
 
-## my-map - Map using cons pattern
+### my-map - Map using `:collect`
 
 ```scheme
 (define (my-map f lst)
-  (loop :initially acc := '()
-        :for item :in lst
-        :do (set! acc (cons (f item) acc))
-        :finally (reverse acc)))
+  (loop :for item :in lst
+        :collect (f item)))
 
 (my-map (lambda (x) (* x 2)) '(1 2 3))  ; => (2 4 6)
 ```
 
-## remove-duplicates - Using cons + hashtable
+### zip - Zip two lists
+
+```scheme
+(define (zip lst1 lst2)
+  (loop :for a :in lst1
+        :for b :in lst2
+        :collect (cons a b)))
+
+(zip '(a b c) '(1 2 3))  ; => ((a . 1) (b . 2) (c . 3))
+```
+
+### range - Generate range
+
+```scheme
+(define (range start end)
+  (loop :for i :from start :to end
+        :collect i))
+
+(range 0 5)  ; => (0 1 2 3 4 5)
+```
+
+### take - Take first n elements
+
+```scheme
+(define (take n lst)
+  (loop :for item :in lst
+        :for count :from 1 :to n
+        :collect item))
+
+(take 3 '(a b c d e))  ; => (a b c)
+```
+
+## When to use manual accumulation: `cons + set! + reverse`
+
+Use manual accumulation ONLY when you need side effects along with collection:
+
+### remove-duplicates - Side effects require manual pattern
 
 ```scheme
 (define (remove-duplicates lst)
@@ -834,50 +861,43 @@ This works everywhere: recursive functions, loop macros, DAG traversal.
         :initially acc := '()
         :for item :in lst
         :unless (hashtable-contains? seen item)
-        :do (hashtable-set! seen item #t)
-        :do (set! acc (cons item acc))
+        :do (hashtable-set! seen item #t)     ; Side effect: update hashtable
+        :do (set! acc (cons item acc))        ; Manual accumulation
         :finally (reverse acc)))
 
 (remove-duplicates '(a b a c b d))  ; => (a b c d)
 ```
 
-## zip - Zip two lists
+**Why manual here?** We need to update the `seen` hashtable AND collect items. 
+`:collect` alone can't express "do side effect, then collect conditionally."
+
+## Universal Scheme Pattern: cons + accumulator + reverse
+
+The manual accumulation pattern (`cons` + `set!` + `reverse`) is a universal Scheme idiom
+that works everywhere: recursive functions, loop macros, DAG traversal.
+
+**Comparison:**
 
 ```scheme
-(define (zip lst1 lst2)
-  (loop :initially acc := '()
-        :for a :in lst1
-        :for b :in lst2
-        :do (set! acc (cons (cons a b) acc))
-        :finally (reverse acc)))
+;; Loop macro with :collect
+(loop :for item :in lst
+      :when (pred item)
+      :collect item)
 
-(zip '(a b c) '(1 2 3))  ; => ((a . 1) (b . 2) (c . 3))
+;; Recursive function (same mental model)
+(define (recursive-filter pred lst)
+  (let loop ((remaining lst) (acc '()))
+    (if (null? remaining)
+        (reverse acc)
+        (loop (cdr remaining)
+              (if (pred (car remaining))
+                  (cons (car remaining) acc)
+                  acc)))))
 ```
 
-## range - Generate range
-
-```scheme
-(define (range start end)
-  (loop :initially acc := '()
-        :for i :from start :to end
-        :do (set! acc (cons i acc))
-        :finally (reverse acc)))
-
-(range 0 5)  ; => (0 1 2 3 4 5)
-```
-
-## take - Take first n elements
-
-```scheme
-(define (take n lst)
-  (loop :initially acc := '()
-        :for item :in lst
-        :for count :from 1 :to n
-        :do (set! acc (cons item acc))
-        :finally (reverse acc)))
-
-(take 3 '(a b c d e))  ; => (a b c)
-```
+**When to use each:**
+- **Use `:collect`** - Simple list building without side effects (99% of cases)
+- **Use manual accumulation** - When you need side effects + collection together
 
 ## PITFALLS
 
