@@ -461,29 +461,169 @@ more examples,
 ;;  2 (2 . 2))
 ```
 
-## `:recur` clauses
+## `:recur` - State Variables That Persist Across Loop Rounds
 
-Very similiar to `do` in scheme.
+The `:recur` clause creates variables that **persist and accumulate state** as the loop runs. 
+
+**Key difference from `:for`:**
+- **`:for` variables** are bound to an iteration sequence - they reset for each new sequence
+- **`:recur` variables** accumulate across ALL rounds - they remember and build on previous values
+
+This enables patterns impossible with `:for` alone:
+- **Fibonacci**: track two previous values (F[n-1], F[n]) across all rounds
+- **Running totals**: accumulate sums, products, or counts
+- **Sliding windows**: remember the previous element
+- **Recursive traversal**: combine with `:name` to restart the loop with updated state
+
+### Syntax
 
 ```scheme
-:recur <var> := <value> :then <step>
+:recur <var> := <init-value> :then <next-value-expr>
 ```
 
-it expands to
+- `<var>` - Variable name that holds the evolving state
+- `<init-value>` - Initial value before the loop starts
+- `<next-value-expr>` - Expression to compute the next value (can reference current loop variables)
 
-```
-(let <recur-name> ((<var> <value>))
-   (<recur-name) <step>)
-```
+### How It Works
 
-To calculate fibonacci
+Each `:recur` clause creates a variable that:
+1. Starts with `<init-value>` before the loop begins
+2. Gets updated to `<next-value-expr>` when moving to the next round
+3. Can reference other loop variables and other `:recur` variables
+
+Multiple `:recur` clauses can work together, and they can reference each other (they update in declaration order).
+
+### Example 1: Fibonacci Sequence
+
+Computing Fibonacci numbers requires tracking two previous values:
+
 ```scheme
 (loop :repeat 10
-      :recur x0 := 0 :then x
-      :recur x := 1 :then (fx+ x0 x)
+      :recur x0 := 0 :then x      ; previous value: starts at 0, then becomes current x
+      :recur x := 1 :then (fx+ x0 x)  ; current value: starts at 1, then becomes sum
       :collect x)
 ;; => (1 1 2 3 5 8 13 21 34 55)
 ```
+
+**Explanation:**
+- `x0` tracks the previous Fibonacci number (F[n-1])
+- `x` tracks the current Fibonacci number (F[n])
+- After each round: `x0` becomes the old `x`, and `x` becomes `x0 + x`
+- We collect `x` to build the sequence
+
+**Execution trace:**
+```
+Round 1:  x0=0,  x=1    → collect 1, then update: x0←1, x←1
+Round 2:  x0=1,  x=1    → collect 1, then update: x0←1, x←2
+Round 3:  x0=1,  x=2    → collect 2, then update: x0←2, x←3
+Round 4:  x0=2,  x=3    → collect 3, then update: x0←3, x←5
+Round 5:  x0=3,  x=5    → collect 5, then update: x0←5, x←8
+...
+```
+
+### Example 2: Factorial
+
+Computing factorial requires accumulating a product:
+
+```scheme
+(loop :for i :from 1 :to 5
+      :recur result := 1 :then (fx* result i)
+      :finally result)
+;; => 120
+```
+
+**Explanation:**
+- `result` accumulates the product: 1 × 1 × 2 × 3 × 4 × 5 = 120
+- Initial value is 1 (multiplicative identity)
+- Each round multiplies `result` by the current `i`
+
+### Example 3: Running Sum
+
+Creating a list of cumulative sums:
+
+```scheme
+(loop :for i :from 1 :to 5
+      :recur sum := 0 :then (fx+ sum i)
+      :collect sum)
+;; => (0 1 3 6 10)
+```
+
+**Explanation:**
+- We collect the sum **before** it's updated
+- Round 1: sum=0, collect 0, then update to 0+1=1
+- Round 2: sum=1, collect 1, then update to 1+2=3
+- Round 3: sum=3, collect 3, then update to 3+3=6
+- etc.
+
+### Example 4: Powers of 2
+
+Generating exponential sequences:
+
+```scheme
+(loop :repeat 8
+      :recur power := 1 :then (fx* power 2)
+      :collect power)
+;; => (1 2 4 8 16 32 64 128)
+```
+
+**Explanation:**
+- Start with `power=1`
+- Each round doubles: 1 → 2 → 4 → 8 → 16 → ...
+
+### Example 5: Sliding Window (Tracking Previous Value)
+
+Pairing each element with its predecessor:
+
+```scheme
+(loop :for i :in '(10 20 30 40 50)
+      :recur prev := #f :then i
+      :collect (cons prev i))
+;; => ((#f . 10) (10 . 20) (20 . 30) (30 . 40) (40 . 50))
+```
+
+**Explanation:**
+- `prev` starts as `#f` (no previous element yet)
+- Each round: `prev` becomes the previous round's `i`
+- Creates pairs showing the transition from one element to the next
+
+### When to Use `:recur`
+
+Use `:recur` when you need to:
+- **Compute recurrence relations** (Fibonacci, factorial, etc.)
+- **Track state across loop rounds** (running totals, sliding windows)
+- **Generate sequences** where each value depends on previous values
+- **Accumulate results** incrementally (when `:count`/`:collect` alone isn't enough)
+
+### Comparison with Other Features
+
+| Feature | Use Case | Example |
+|---------|----------|---------|
+| `:recur` | State that evolves based on previous values | Fibonacci, running sum |
+| `:count :into` | Simple accumulation with custom increment | Weighted counting |
+| `:with :=` | Loop-invariant values (computed once) | Constants, pre-computed values |
+| `:initially` | One-time setup code before loop starts | Initialize external state |
+
+### How It Works
+
+`:recur` creates bindings in the **outer named `let`**, while `:for` creates bindings in the **inner named `let`**.
+
+**Quick example:**
+
+```scheme
+(loop :for i :from 1 :to 3
+      :recur sum := 0 :then (fx+ sum i)
+      :collect (cons sum i))
+;; => ((0 . 1) (1 . 2) (3 . 3))
+```
+
+- Round 1: `sum=0`, `i=1` → collect `(0 . 1)` → update to `sum=1`
+- Round 2: `sum=1`, `i=2` → collect `(1 . 2)` → update to `sum=3`
+- Round 3: `sum=3`, `i=3` → collect `(3 . 3)` → update to `sum=6`
+
+Notice: we collect the value **before** the `:then` expression updates it.
+
+For the detailed expansion showing the nested `let` forms, see [rime-internal.md](rime-internal.md#concrete-example-3-recur-clause).
 ## named loop
 
 A loop expression can be named with `:named` keyword, similiar to
@@ -585,60 +725,45 @@ so that we can implement `deep-flatten` as below,
 Given a file name `file-name` and character position `position`,
 `get-column-line-number` returns a pair which contains line number and
 column.
-## member? - Check if element exists in list
+
+## member? - Check if element exists
 
 ```scheme
 (define (member? x lst)
   (loop :for item :in lst
         :if (equal? x item)
-        :break #t
-        :finally #f))
+        :break #t))
 
 (member? 'b '(a b c))  ; => #t
-(member? 'd '(a b c))  ; => #f
+(member? 'd '(a b c))  ; => #<void>
 ```
 
-## list-index - Find index of element in list
+**Note:** Don't use `:finally #f` with `:break` - see PITFALLS section below.
+
+## list-index - Find index of element
 
 ```scheme
 (define (list-index x lst)
   (loop :for item :in lst
         :for index :from 0
         :if (equal? x item)
-        :break index
-        :finally #f))
+        :break index))
 
 (list-index 'b '(a b c))    ; => 1
-(list-index 'd '(a b c))    ; => #f
-(list-index 'a '(a b a c))  ; => 0
+(list-index 'd '(a b c))    ; => #<void>
 ```
 
-## vector-index - Find index of element in vector
+## vector-index - Find index in vector
 
 ```scheme
 (define (vector-index x vec)
   (loop :for item :in-vector vec
         :for index :from 0
         :if (equal? x item)
-        :break index
-        :finally #f))
+        :break index))
 
-(vector-index 20 (vector 10 20 30))       ; => 1
-(vector-index 40 (vector 10 20 30))       ; => #f
-(vector-index 10 (vector 10 20 10 30))    ; => 0
-```
-
-## list-indices - Find all indices of element
-
-```scheme
-(define (list-indices x lst)
-  (loop :for item :in lst
-        :for index :from 0
-        :if (equal? x item)
-        :collect index))
-
-(list-indices 'a '(a b a c a))  ; => (0 2 4)
-(list-indices 'd '(a b c))      ; => ()
+(vector-index 20 (vector 10 20 30))  ; => 1
+(vector-index 40 (vector 10 20 30))  ; => #<void>
 ```
 
 ## find-first - Find first element satisfying predicate
@@ -647,11 +772,10 @@ column.
 (define (find-first pred lst)
   (loop :for item :in lst
         :if (pred item)
-        :break item
-        :finally #f))
+        :break item))
 
 (find-first even? '(1 3 4 5 6))  ; => 4
-(find-first even? '(1 3 5))      ; => #f
+(find-first even? '(1 3 5))      ; => #<void>
 ```
 
 ## count-occurrences - Count element occurrences
@@ -666,20 +790,47 @@ column.
 (count-occurrences 'd '(a b c))      ; => 0
 ```
 
-## remove-duplicates - Remove duplicate elements (preserving order)
+# More Practical Examples
+
+## Simple list building - Use `:collect`
+
+For simple list building, use `:collect` - it's clearer and more efficient:
+
+### list-indices - Find all indices of element
 
 ```scheme
-(define (remove-duplicates lst)
-  (loop :initially seen := (make-eq-hashtable)
-        :for item :in lst
-        :unless (hashtable-contains? seen item)
-        :do (hashtable-set! seen item #t)
-        :collect item))
+(define (list-indices x lst)
+  (loop :for item :in lst
+        :for index :from 0
+        :when (equal? x item)
+        :collect index))
 
-(remove-duplicates '(a b a c b d))  ; => (a b c d)
+(list-indices 'a '(a b a c a))  ; => (0 2 4)
+(list-indices 'd '(a b c))      ; => ()
 ```
 
-## zip - Zip two lists together
+### my-filter - Filter using `:collect`
+
+```scheme
+(define (my-filter pred lst)
+  (loop :for item :in lst
+        :when (pred item)
+        :collect item))
+
+(my-filter even? '(1 2 3 4 5 6))  ; => (2 4 6)
+```
+
+### my-map - Map using `:collect`
+
+```scheme
+(define (my-map f lst)
+  (loop :for item :in lst
+        :collect (f item)))
+
+(my-map (lambda (x) (* x 2)) '(1 2 3))  ; => (2 4 6)
+```
+
+### zip - Zip two lists
 
 ```scheme
 (define (zip lst1 lst2)
@@ -687,22 +838,20 @@ column.
         :for b :in lst2
         :collect (cons a b)))
 
-(zip '(a b c) '(1 2 3))     ; => ((a . 1) (b . 2) (c . 3))
-(zip '(a b c d) '(1 2))     ; => ((a . 1) (b . 2))
+(zip '(a b c) '(1 2 3))  ; => ((a . 1) (b . 2) (c . 3))
 ```
 
-## range - Generate a range of numbers
+### range - Generate range
 
 ```scheme
 (define (range start end)
   (loop :for i :from start :to end
         :collect i))
 
-(range 0 5)    ; => (0 1 2 3 4 5)
-(range 10 12)  ; => (10 11 12)
+(range 0 5)  ; => (0 1 2 3 4 5)
 ```
 
-## take - Take first n elements
+### take - Take first n elements
 
 ```scheme
 (define (take n lst)
@@ -712,79 +861,12 @@ column.
 
 (take 3 '(a b c d e))  ; => (a b c)
 ```
-## Universal Scheme Pattern: cons + accumulator
 
-These examples use the universal Scheme idiom: build lists with `cons` (reverse if needed).
-This pattern works in loop macros, recursive functions, DAG traversal, anywhere.
+## When to use manual accumulation: `cons + set! + reverse`
 
-### member? - Check if element exists
+Use manual accumulation ONLY when you need side effects along with collection:
 
-```scheme
-(define (member? x lst)
-  (loop :for item :in lst
-        :if (equal? x item)
-        :break #t
-        :finally #f))
-
-(member? 'b '(a b c))  ; => #t
-(member? 'd '(a b c))  ; => #f
-```
-
-### list-index - Find index of element
-
-```scheme
-(define (list-index x lst)
-  (loop :for item :in lst
-        :for index :from 0
-        :if (equal? x item)
-        :break index
-        :finally #f))
-
-(list-index 'b '(a b c))    ; => 1
-(list-index 'd '(a b c))    ; => #f
-```
-
-### list-indices - Find all indices (using cons + reverse)
-
-```scheme
-(define (list-indices x lst)
-  (loop :initially acc := '()
-        :for item :in lst
-        :for index :from 0
-        :if (equal? x item)
-        :with acc := (cons index acc)
-        :finally (reverse acc)))
-
-(list-indices 'a '(a b a c a))  ; => (0 2 4)
-(list-indices 'd '(a b c))      ; => ()
-```
-
-### my-filter - Filter using cons pattern
-
-```scheme
-(define (my-filter pred lst)
-  (loop :initially acc := '()
-        :for item :in lst
-        :if (pred item)
-        :with acc := (cons item acc)
-        :finally (reverse acc)))
-
-(my-filter even? '(1 2 3 4 5 6))  ; => (2 4 6)
-```
-
-### my-map - Map using cons pattern
-
-```scheme
-(define (my-map f lst)
-  (loop :initially acc := '()
-        :for item :in lst
-        :with acc := (cons (f item) acc)
-        :finally (reverse acc)))
-
-(my-map (lambda (x) (* x 2)) '(1 2 3))  ; => (2 4 6)
-```
-
-### remove-duplicates - Using cons + hashtable
+### remove-duplicates - Side effects require manual pattern
 
 ```scheme
 (define (remove-duplicates lst)
@@ -792,62 +874,30 @@ This pattern works in loop macros, recursive functions, DAG traversal, anywhere.
         :initially acc := '()
         :for item :in lst
         :unless (hashtable-contains? seen item)
-        :do (hashtable-set! seen item #t)
-        :with acc := (cons item acc)
+        :do (hashtable-set! seen item #t)     ; Side effect: update hashtable
+        :do (set! acc (cons item acc))        ; Manual accumulation
         :finally (reverse acc)))
 
 (remove-duplicates '(a b a c b d))  ; => (a b c d)
 ```
 
-### zip - Zip two lists
+**Why manual here?** We need to update the `seen` hashtable AND collect items. 
+`:collect` alone can't express "do side effect, then collect conditionally."
+
+## Universal Scheme Pattern: cons + accumulator + reverse
+
+The manual accumulation pattern (`cons` + `set!` + `reverse`) is a universal Scheme idiom
+that works everywhere: recursive functions, loop macros, DAG traversal.
+
+**Comparison:**
 
 ```scheme
-(define (zip lst1 lst2)
-  (loop :initially acc := '()
-        :for a :in lst1
-        :for b :in lst2
-        :with acc := (cons (cons a b) acc)
-        :finally (reverse acc)))
+;; Loop macro with :collect
+(loop :for item :in lst
+      :when (pred item)
+      :collect item)
 
-(zip '(a b c) '(1 2 3))  ; => ((a . 1) (b . 2) (c . 3))
-```
-
-### range - Generate range
-
-```scheme
-(define (range start end)
-  (loop :initially acc := '()
-        :for i :from start :to end
-        :with acc := (cons i acc)
-        :finally (reverse acc)))
-
-(range 0 5)  ; => (0 1 2 3 4 5)
-```
-
-### take - Take first n elements
-
-```scheme
-(define (take n lst)
-  (loop :initially acc := '()
-        :for item :in lst
-        :for count :from 1 :to n
-        :with acc := (cons item acc)
-        :finally (reverse acc)))
-
-(take 3 '(a b c d e))  ; => (a b c)
-```
-
-## Why this pattern?
-
-**Universal:** Works in recursive functions, loop macros, DAG traversal, tree traversal.
-
-**Efficient:** `cons` is O(1), reverse is O(n) once at the end.
-
-**Standard Scheme idiom:** Every Scheme programmer recognizes this pattern.
-
-Example in recursive function (same pattern):
-
-```scheme
+;; Recursive function (same mental model)
 (define (recursive-filter pred lst)
   (let loop ((remaining lst) (acc '()))
     (if (null? remaining)
@@ -858,253 +908,9 @@ Example in recursive function (same pattern):
                   acc)))))
 ```
 
-The loop macro version uses the same mental model: accumulator + cons + reverse.
-## Universal Scheme Pattern: cons + accumulator
-
-These examples use the universal Scheme idiom: build lists with `cons` using an accumulator.
-This pattern works in loop macros, recursive functions, DAG traversal, anywhere.
-
-### member? - Check if element exists
-
-```scheme
-(define (member? x lst)
-  (loop :for item :in lst
-        :if (equal? x item)
-        :break #t))
-
-(member? 'b '(a b c))  ; => #t
-(member? 'd '(a b c))  ; => #<void>
-```
-
-### list-index - Find index of element
-
-```scheme
-(define (list-index x lst)
-  (loop :for item :in lst
-        :for index :from 0
-        :if (equal? x item)
-        :break index))
-
-(list-index 'b '(a b c))    ; => 1
-(list-index 'd '(a b c))    ; => #<void>
-```
-
-### list-indices - Find all indices (using cons + reverse)
-
-```scheme
-(define (list-indices x lst)
-  (loop :initially acc := '()
-        :for item :in lst
-        :for index :from 0
-        :when (equal? x item)
-        :do (set! acc (cons index acc))
-        :finally (reverse acc)))
-
-(list-indices 'a '(a b a c a))  ; => (0 2 4)
-(list-indices 'd '(a b c))      ; => ()
-```
-
-### my-filter - Filter using cons pattern
-
-```scheme
-(define (my-filter pred lst)
-  (loop :initially acc := '()
-        :for item :in lst
-        :when (pred item)
-        :do (set! acc (cons item acc))
-        :finally (reverse acc)))
-
-(my-filter even? '(1 2 3 4 5 6))  ; => (2 4 6)
-```
-
-### my-map - Map using cons pattern
-
-```scheme
-(define (my-map f lst)
-  (loop :initially acc := '()
-        :for item :in lst
-        :do (set! acc (cons (f item) acc))
-        :finally (reverse acc)))
-
-(my-map (lambda (x) (* x 2)) '(1 2 3))  ; => (2 4 6)
-```
-
-### remove-duplicates - Using cons + hashtable
-
-```scheme
-(define (remove-duplicates lst)
-  (loop :initially seen := (make-eq-hashtable)
-        :initially acc := '()
-        :for item :in lst
-        :unless (hashtable-contains? seen item)
-        :do (hashtable-set! seen item #t)
-        :do (set! acc (cons item acc))
-        :finally (reverse acc)))
-
-(remove-duplicates '(a b a c b d))  ; => (a b c d)
-```
-
-### zip - Zip two lists
-
-```scheme
-(define (zip lst1 lst2)
-  (loop :initially acc := '()
-        :for a :in lst1
-        :for b :in lst2
-        :do (set! acc (cons (cons a b) acc))
-        :finally (reverse acc)))
-
-(zip '(a b c) '(1 2 3))  ; => ((a . 1) (b . 2) (c . 3))
-```
-
-### range - Generate range
-
-```scheme
-(define (range start end)
-  (loop :initially acc := '()
-        :for i :from start :to end
-        :do (set! acc (cons i acc))
-        :finally (reverse acc)))
-
-(range 0 5)  ; => (0 1 2 3 4 5)
-```
-
-### take - Take first n elements
-
-```scheme
-(define (take n lst)
-  (loop :initially acc := '()
-        :for item :in lst
-        :for count :from 1 :to n
-        :do (set! acc (cons item acc))
-        :finally (reverse acc)))
-
-(take 3 '(a b c d e))  ; => (a b c)
-```
-
-## Why this pattern?
-
-**Universal:** Works in recursive functions, loop macros, DAG traversal, tree traversal.
-
-**Efficient:** `cons` is O(1), reverse is O(n) once at the end.
-
-**Standard Scheme idiom:** Every Scheme programmer recognizes this pattern.
-
-Example in recursive function (same pattern):
-
-```scheme
-(define (recursive-filter pred lst)
-  (let loop ((remaining lst) (acc '()))
-    (if (null? remaining)
-        (reverse acc)
-        (loop (cdr remaining)
-              (if (pred (car remaining))
-                  (cons (car remaining) acc)
-                  acc)))))
-```
-
-The loop macro version uses the same mental model: accumulator + cons + reverse.
-# Practical Examples Using Universal Scheme Idiom
-
-All examples verified with actual output from Chez Scheme 10.4.1.
-
-## Universal Pattern: cons + accumulator + reverse
-
-Build lists with `cons` (O(1)), reverse at end if order matters.
-This works everywhere: recursive functions, loop macros, DAG traversal.
-
-## list-indices - Find all indices of element
-
-```scheme
-(define (list-indices x lst)
-  (loop :initially acc := '()
-        :for item :in lst
-        :for index :from 0
-        :when (equal? x item)
-        :do (set! acc (cons index acc))
-        :finally (reverse acc)))
-
-(list-indices 'a '(a b a c a))  ; => (0 2 4)
-(list-indices 'd '(a b c))      ; => ()
-```
-
-## my-filter - Filter using cons pattern
-
-```scheme
-(define (my-filter pred lst)
-  (loop :initially acc := '()
-        :for item :in lst
-        :when (pred item)
-        :do (set! acc (cons item acc))
-        :finally (reverse acc)))
-
-(my-filter even? '(1 2 3 4 5 6))  ; => (2 4 6)
-```
-
-## my-map - Map using cons pattern
-
-```scheme
-(define (my-map f lst)
-  (loop :initially acc := '()
-        :for item :in lst
-        :do (set! acc (cons (f item) acc))
-        :finally (reverse acc)))
-
-(my-map (lambda (x) (* x 2)) '(1 2 3))  ; => (2 4 6)
-```
-
-## remove-duplicates - Using cons + hashtable
-
-```scheme
-(define (remove-duplicates lst)
-  (loop :initially seen := (make-eq-hashtable)
-        :initially acc := '()
-        :for item :in lst
-        :unless (hashtable-contains? seen item)
-        :do (hashtable-set! seen item #t)
-        :do (set! acc (cons item acc))
-        :finally (reverse acc)))
-
-(remove-duplicates '(a b a c b d))  ; => (a b c d)
-```
-
-## zip - Zip two lists
-
-```scheme
-(define (zip lst1 lst2)
-  (loop :initially acc := '()
-        :for a :in lst1
-        :for b :in lst2
-        :do (set! acc (cons (cons a b) acc))
-        :finally (reverse acc)))
-
-(zip '(a b c) '(1 2 3))  ; => ((a . 1) (b . 2) (c . 3))
-```
-
-## range - Generate range
-
-```scheme
-(define (range start end)
-  (loop :initially acc := '()
-        :for i :from start :to end
-        :do (set! acc (cons i acc))
-        :finally (reverse acc)))
-
-(range 0 5)  ; => (0 1 2 3 4 5)
-```
-
-## take - Take first n elements
-
-```scheme
-(define (take n lst)
-  (loop :initially acc := '()
-        :for item :in lst
-        :for count :from 1 :to n
-        :do (set! acc (cons item acc))
-        :finally (reverse acc)))
-
-(take 3 '(a b c d e))  ; => (a b c)
-```
+**When to use each:**
+- **Use `:collect`** - Simple list building without side effects (99% of cases)
+- **Use manual accumulation** - When you need side effects + collection together
 
 ## PITFALLS
 
