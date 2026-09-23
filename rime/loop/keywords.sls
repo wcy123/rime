@@ -25,6 +25,7 @@
    :then
    :in-directory
    :reverse
+   :step
    assq-id
    new-sym
    keyword?
@@ -108,6 +109,7 @@
   (define-keyword :then)
   (define-keyword :in-directory)
   (define-keyword :reverse)
+  (define-keyword :step)
 
   (define (keyword? e)
     (exists (lambda (keyword)
@@ -173,6 +175,7 @@
              (syntax :then)
              (syntax :in-directory)
              (syntax :reverse)
+             (syntax :step)
              )))
 
   (define (keyword=? k1 k2)
