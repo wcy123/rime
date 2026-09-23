@@ -153,72 +153,65 @@ User writes:
 ;; => ((0 . 1) (1 . 2) (3 . 3))
 ```
 
-This expands to (simplified):
+Actual expansion (from `expand`, cleaned up):
 
 ```scheme
-(let* ([:return-value '()])              ; setup
+(let ([:return-value '()])
+  (let ([:collector ...]
+        [:extractor ...])
 
-  ;; OUTER named let: binds :recur variables
-  (let recur ([sum 0])                   ; :recur sum := 0 (initial value)
+    ;; OUTER letrec: defines g1 function for :recur bindings
+    ((letrec ([g1 (lambda (sum)              ; g1 takes :recur variable sum
 
-    (let* ()                             ; outer-iteration (empty)
-
-      ;; INNER named let: binds :for variables
-      (let loop ([i 1]                   ; :for i :from 1 (iteration variable)
-                 [sum sum])              ; Pass sum from outer to inner
-
-        (let* ()                          ; inner-iteration (empty)
-
-          ;; Continue condition
-          (if (fx<=? i 3)                 ; :to 3
-
-              (let* ()                    ; inner-if-true (empty)
-                ;; Loop body
-                (collect (cons sum i))    ; :collect (cons sum i)
-
-                ;; Recursive call to loop: advance to next iteration
-                (loop (fx+ i 1)           ; Step i: 1→2→3→4
-                      (fx+ sum i)))       ; :then (fx+ sum i): update sum!
-
-              ;; Loop ended
-              :return-value))))))
+                    ;; INNER letrec: defines g0 function for :for bindings  
+                    ((letrec ([g0 (lambda (i sum)    ; g0 takes :for variable i + sum
+                                    (if (fx<=? i 3)
+                                        (begin
+                                          (:collector (cons sum i))
+                                          ;; Recursive call to g0 (INNER)
+                                          (g0 (fx+ i 1)      ; Step i
+                                              (fx+ sum i)))  ; Step sum
+                                        :return-value))])
+                       g0)    ; Return g0 function
+                     1        ; Call g0 with i=1
+                     sum))])  ; and sum from outer g1
+       g1)    ; Return g1 function  
+     0)))     ; Call g1 with sum=0
 ```
 
 **Execution trace:**
 
 ```
-Round 1: recur(sum=0) → loop(i=1, sum=0) 
-         → collect (0 . 1) 
-         → loop(i=2, sum=1)
-
-Round 2: loop(i=2, sum=1) 
-         → collect (1 . 2) 
-         → loop(i=3, sum=3)
-
-Round 3: loop(i=3, sum=3) 
-         → collect (3 . 3) 
-         → loop(i=4, sum=6)
-
-Round 4: loop(i=4, sum=6) 
-         → (fx<=? 4 3) is false 
-         → return '((0 . 1) (1 . 2) (3 . 3))
+Start:   g1(sum=0) → returns g0, then calls g0(i=1, sum=0)
+Round 1: g0(i=1, sum=0) → collect (0 . 1) → g0(i=2, sum=1)
+Round 2: g0(i=2, sum=1) → collect (1 . 2) → g0(i=3, sum=3)
+Round 3: g0(i=3, sum=3) → collect (3 . 3) → g0(i=4, sum=6)
+Round 4: g0(i=4, sum=6) → (fx<=? 4 3) is false → return result
 ```
-
-**Bindings from plugin methods:**
-
-- `(recur-plugin 'recur)` → `sum` = 0 (bound in outer `let recur`)
-- `(recur-plugin 'iteration)` → `(sum sum (fx+ sum i))` (passed through inner `let loop`)
-- `(arithmetic-plugin 'iteration)` → `(i 1 (fx+ i 1))` (steps through values)
 
 **Key observations:**
 
-1. `:recur sum` creates binding in OUTER `let recur` with initial value 0
-2. `sum` is passed as parameter to INNER `let loop` 
-3. Each recursive call to `loop` passes UPDATED sum: `(fx+ sum i)`
-4. `i` steps normally: 1→2→3→4
-5. `sum` accumulates: 0→1→3→6
-6. We collect BEFORE updating (that's why we see 0, 1, 3 not 1, 3, 6)
-7. The `:then` expression determines the value passed in the next recursive call
+1. **Two nested `letrec` forms:**
+   - Outer `g1`: binds `:recur sum` parameter
+   - Inner `g0`: binds `:for i` parameter (and receives `sum`)
+
+2. **We only ever call `g0` during the loop**
+   - `g1` is called once: `g1(0)` which sets up `sum=0`
+   - `g0` is called repeatedly: `g0(1,0) → g0(2,1) → g0(3,3) → g0(4,6)`
+
+3. **Answer to "why need outer `g1`?"**
+   
+   In this simple example, `g1` is only called once at startup. But when you use **`:name recur`**, you can explicitly call `g1` to **restart the entire loop** with new `:recur` values:
+
+   ```scheme
+   (loop :name restart
+         :recur depth := 0
+         :for item :in items
+         :do (restart (+ depth 1) item) :if (list? item)  ; Calls g1!
+         :collect item :unless (list? item))
+   ```
+
+   Here, `:do (restart ...)` calls `g1` with a new `depth` value, which then creates a fresh `g0` iteration starting from the first item. This enables recursive tree/graph traversal.
 
 ---
 
