@@ -712,6 +712,71 @@ so that we can implement `deep-flatten` as below,
 Given a file name `file-name` and character position `position`,
 `get-column-line-number` returns a pair which contains line number and
 column.
+
+## member? - Check if element exists
+
+```scheme
+(define (member? x lst)
+  (loop :for item :in lst
+        :if (equal? x item)
+        :break #t))
+
+(member? 'b '(a b c))  ; => #t
+(member? 'd '(a b c))  ; => #<void>
+```
+
+**Note:** Don't use `:finally #f` with `:break` - see PITFALLS section below.
+
+## list-index - Find index of element
+
+```scheme
+(define (list-index x lst)
+  (loop :for item :in lst
+        :for index :from 0
+        :if (equal? x item)
+        :break index))
+
+(list-index 'b '(a b c))    ; => 1
+(list-index 'd '(a b c))    ; => #<void>
+```
+
+## vector-index - Find index in vector
+
+```scheme
+(define (vector-index x vec)
+  (loop :for item :in-vector vec
+        :for index :from 0
+        :if (equal? x item)
+        :break index))
+
+(vector-index 20 (vector 10 20 30))  ; => 1
+(vector-index 40 (vector 10 20 30))  ; => #<void>
+```
+
+## find-first - Find first element satisfying predicate
+
+```scheme
+(define (find-first pred lst)
+  (loop :for item :in lst
+        :if (pred item)
+        :break item))
+
+(find-first even? '(1 3 4 5 6))  ; => 4
+(find-first even? '(1 3 5))      ; => #<void>
+```
+
+## count-occurrences - Count element occurrences
+
+```scheme
+(define (count-occurrences x lst)
+  (loop :for item :in lst
+        :if (equal? x item)
+        :count))
+
+(count-occurrences 'a '(a b a c a))  ; => 3
+(count-occurrences 'd '(a b c))      ; => 0
+```
+
 # Practical Examples Using Universal Scheme Idiom
 
 All examples verified with actual output from Chez Scheme 10.4.1.
