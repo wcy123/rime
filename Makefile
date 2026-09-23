@@ -20,10 +20,20 @@ TEST_CASES := $(patsubst test/%.sls, %, \
 all:
 	@echo small libs in scheme, r6rs compatible.
 
-.PHONY: test
+.PHONY: test test-standalone
 
-test: test-chez test-guile
+test: test-chez test-guile test-standalone
 	@echo; echo "MAKE: TEST FINISH $(TEST_CASES)"
+
+# Standalone script tests - catch bugs that unit tests miss
+STANDALONE_TESTS := $(wildcard test/standalone/*.scm)
+test-standalone:
+	@echo "[ test-standalone ] Running standalone script tests"
+	@for script in $(STANDALONE_TESTS); do \
+		echo "  Running $$script..."; \
+		"$(CHEZ)" --script $$script || exit 1; \
+	done
+	@echo "[ test-standalone ] All standalone tests passed"
 
 
 define test_rule
