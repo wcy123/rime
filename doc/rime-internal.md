@@ -142,6 +142,84 @@ Both follow the same pattern:
 - **`recur`**: initial/constant value (restart point)
 - **`iteration`**: current value that steps forward
 
+### Concrete Example 3: `:recur` Clause
+
+User writes:
+
+```scheme
+(loop :for i :from 1 :to 3
+      :recur sum := 0 :then (fx+ sum i)
+      :collect (cons sum i))
+;; => ((0 . 1) (1 . 2) (3 . 3))
+```
+
+This expands to (simplified):
+
+```scheme
+(let* ([:return-value '()])              ; setup
+
+  ;; OUTER named let: binds :recur variables
+  (let recur ([sum 0])                   ; :recur sum := 0 (initial value)
+
+    (let* ()                             ; outer-iteration (empty)
+
+      ;; INNER named let: binds :for variables
+      (let loop ([i 1]                   ; :for i :from 1 (iteration variable)
+                 [sum sum])              ; Pass sum from outer to inner
+
+        (let* ()                          ; inner-iteration (empty)
+
+          ;; Continue condition
+          (if (fx<=? i 3)                 ; :to 3
+
+              (let* ()                    ; inner-if-true (empty)
+                ;; Loop body
+                (collect (cons sum i))    ; :collect (cons sum i)
+
+                ;; Recursive call to loop: advance to next iteration
+                (loop (fx+ i 1)           ; Step i: 1→2→3→4
+                      (fx+ sum i)))       ; :then (fx+ sum i): update sum!
+
+              ;; Loop ended
+              :return-value))))))
+```
+
+**Execution trace:**
+
+```
+Round 1: recur(sum=0) → loop(i=1, sum=0) 
+         → collect (0 . 1) 
+         → loop(i=2, sum=1)
+
+Round 2: loop(i=2, sum=1) 
+         → collect (1 . 2) 
+         → loop(i=3, sum=3)
+
+Round 3: loop(i=3, sum=3) 
+         → collect (3 . 3) 
+         → loop(i=4, sum=6)
+
+Round 4: loop(i=4, sum=6) 
+         → (fx<=? 4 3) is false 
+         → return '((0 . 1) (1 . 2) (3 . 3))
+```
+
+**Bindings from plugin methods:**
+
+- `(recur-plugin 'recur)` → `sum` = 0 (bound in outer `let recur`)
+- `(recur-plugin 'iteration)` → `(sum sum (fx+ sum i))` (passed through inner `let loop`)
+- `(arithmetic-plugin 'iteration)` → `(i 1 (fx+ i 1))` (steps through values)
+
+**Key observations:**
+
+1. `:recur sum` creates binding in OUTER `let recur` with initial value 0
+2. `sum` is passed as parameter to INNER `let loop` 
+3. Each recursive call to `loop` passes UPDATED sum: `(fx+ sum i)`
+4. `i` steps normally: 1→2→3→4
+5. `sum` accumulates: 0→1→3→6
+6. We collect BEFORE updating (that's why we see 0, 1, 3 not 1, 3, 6)
+7. The `:then` expression determines the value passed in the next recursive call
+
 ---
 
 ## Plugin Architecture

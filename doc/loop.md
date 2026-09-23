@@ -604,23 +604,26 @@ Use `:recur` when you need to:
 | `:with :=` | Loop-invariant values (computed once) | Constants, pre-computed values |
 | `:initially` | One-time setup code before loop starts | Initialize external state |
 
-### Technical Details
+### How It Works
 
-The `:recur` clause expands to a named `let` binding:
+`:recur` creates bindings in the **outer named `let`**, while `:for` creates bindings in the **inner named `let`**.
+
+**Quick example:**
 
 ```scheme
-;; This loop:
-(loop :repeat 3
-      :recur x := 0 :then (fx+ x 1)
-      :collect x)
-
-;; Expands roughly to:
-(let recur-loop ([x 0])
-  (if (>= iteration-count 3)
-      result
-      (let ([collected x])
-        (recur-loop (fx+ x 1)))))  ; Recursive call with updated x
+(loop :for i :from 1 :to 3
+      :recur sum := 0 :then (fx+ sum i)
+      :collect (cons sum i))
+;; => ((0 . 1) (1 . 2) (3 . 3))
 ```
+
+- Round 1: `sum=0`, `i=1` → collect `(0 . 1)` → update to `sum=1`
+- Round 2: `sum=1`, `i=2` → collect `(1 . 2)` → update to `sum=3`
+- Round 3: `sum=3`, `i=3` → collect `(3 . 3)` → update to `sum=6`
+
+Notice: we collect the value **before** the `:then` expression updates it.
+
+For the detailed expansion showing the nested `let` forms, see [rime-internal.md](rime-internal.md#concrete-example-3-recur-clause).
 ## named loop
 
 A loop expression can be named with `:named` keyword, similiar to
