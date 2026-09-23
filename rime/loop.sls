@@ -24,6 +24,7 @@
           :then
           :in-directory
           :reverse
+          :step
           )
   (import (rnrs (6))
           (rime loop keywords)
