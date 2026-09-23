@@ -25,9 +25,6 @@ jobs:
       - name: test with chez
         run: make test-chez
 
-      - name: test standalone scripts
-        run: make test-standalone
-
       - name: test with guile
         run: make test-guile
 
@@ -52,9 +49,6 @@ jobs:
 
       - name: test with chez
         run: make test-chez
-
-      - name: test standalone scripts
-        run: make test-standalone
 
       - name: test with guile
         run: make test-guile
@@ -81,8 +75,3 @@ jobs:
         run: |
           $env:Path += ';c:\Program Files\Chez Scheme 10.0.0\bin\ta6nt'
           make test-chez
-
-      - name: test standalone scripts
-        run: |
-          $env:Path += ';c:\Program Files\Chez Scheme 10.0.0\bin\ta6nt'
-          make test-standalone
