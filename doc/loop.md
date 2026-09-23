@@ -183,10 +183,13 @@ accumulate elements into a new variable other than `:return-value`.
 ## `:count`
 
 ```
-:count [:into <var>] [:by <expr>] [:if <cond>] [:unless <cond>] [:when <cond>]
+:count [:into <var>] [:step <expr>] [:by <key>] [:if <cond>] [:unless <cond>] [:when <cond>] [:make-hash-table <expr>]
 ```
 
-The `:count` clause accumulates a count, defaulting to incrementing by 1 each iteration.
+The `:count` clause has two modes:
+
+1. **Simple counting**: Accumulates a numeric count (default increment is 1)
+2. **Grouping mode**: When `:by <key>` is used, creates a hashtable that counts occurrences of each key
 
 **Basic counting (counts iterations):**
 
@@ -207,22 +210,22 @@ The `:count` clause accumulates a count, defaulting to incrementing by 1 each it
       :count :unless (< i 5))  ; => 6
 ```
 
-**Custom increment with `:by`:**
+**Custom increment with `:step`:**
 
-By default, `:count` increments by 1. Use `:by <expr>` to increment by a different amount:
+By default, `:count` increments by 1. Use `:step <expr>` to increment by a different amount:
 
 ```scheme
-(loop :for i :from 1 :to 5 :count :by 2)  ; => 10 (counts 5 times, adding 2 each)
+(loop :for i :from 1 :to 5 :count :step 2)  ; => 10 (counts 5 times, adding 2 each)
 
-(loop :for i :from 1 :to 5 :count :by i)  ; => 15 (sum: 1+2+3+4+5)
+(loop :for i :from 1 :to 5 :count :step i)  ; => 15 (sum: 1+2+3+4+5)
 ```
 
 **Count into variable with `:into`:**
 
 ```scheme
 (loop :for i :from 1 :to 10
-      :count :into evens :by i :if (even? i)
-      :count :into odds :by i :if (odd? i)
+      :count :into evens :step i :if (even? i)
+      :count :into odds :step i :if (odd? i)
       :finally (cons evens odds))  ; => (30 . 25)
 ```
 
@@ -231,9 +234,36 @@ By default, `:count` increments by 1. Use `:by <expr>` to increment by a differe
 ```scheme
 (loop :for score :in '(80 90 100 70 60)
       :for weight :in '(1 1 2 1 1)
-      :count :into total :by (* score weight)
+      :count :into total :step (* score weight)
       :finally total)  ; => 500
 ```
+
+**Grouping mode with `:by <key>`:**
+
+When `:by` is used, `:count` creates a hashtable that counts occurrences of each key:
+
+```scheme
+;; Count occurrences of each number
+(loop :for i :in '(1 2 1 2 3 1 2 3)
+      :count :by i)
+; => hashtable with {1:3, 2:3, 3:2}
+
+;; Count with conditions
+(loop :for i :in '(1 2 1 2 3 1 2 3)
+      :count :by i :if (odd? i))
+; => hashtable with {1:3, 3:2}
+
+;; Custom hash function with :make-hash-table
+(loop :for str :in (map string (string->list "Hello World"))
+      :count :by str
+      :make-hash-table (make-hashtable string-hash string=?))
+; => hashtable with {"H":1, "e":1, "l":3, "o":2, " ":1, "W":1, "r":1, "d":1}
+```
+
+**Important distinctions:**
+- `:step` - Controls the increment amount in simple counting mode
+- `:by` - Switches to grouping mode, creates a hashtable counting by key
+- `:into` - Works with both modes (stores numeric result or hashtable)
 
 ## `:do` clause
 
