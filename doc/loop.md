@@ -461,9 +461,9 @@ more examples,
 ;;  2 (2 . 2))
 ```
 
-## `:recur` - Recurrence Relations
+## `:recur` - Self-Updating Variables
 
-The `:recur` clause enables you to maintain state that evolves across iterations using recurrence relations. It's similar to Scheme's `do` form but integrates naturally with loop's iteration constructs.
+The `:recur` clause creates variables that update themselves on each loop step. Unlike normal loop variables (`:for`), `:recur` variables can depend on their own previous values.
 
 ### Syntax
 
