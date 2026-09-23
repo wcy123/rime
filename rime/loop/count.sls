@@ -3,89 +3,68 @@
   (import (rnrs (6))
           (rime loop plugin)
           (rime loop keywords))
-  (define (make-count-by-plugin props)
-    (let ([s-key (assq-id ':by props #f)]
-          [s-var (assq-id ':into props #f)]
-          [s-cond-expr (assq-id ':if props #t)]
-          [s-make-hash-table (assq-id ':make-hash-table props #'(make-eq-hashtable))])
 
-      (with-syntax ([key s-key]
-                    [var s-var]
-                    [cond-expr s-cond-expr]
-                    [make-hash-table s-make-hash-table]
-                    )
+  ;; Plugin for :count with proper :into, :by, and :if support
+  (define (make-count-plugin props)
+    (let ([s-var (assq-id ':into props #f)]
+          [s-by (assq-id ':by props #'1)]  ; default increment is 1
+          [s-cond-expr (assq-id ':if props #t)])
+
+      (with-syntax ([var s-var]
+                    [by-expr s-by]
+                    [cond-expr s-cond-expr])
         (lambda (method . args)
           (case method
             [(debug)
              (object-to-string
-              ":count "
-              (if s-key (list " :by "  (syntax->datum s-key))
-                  "")
-              " :into " (syntax->datum s-var)
-              " :if " (syntax->datum s-cond-expr))
-             ]
+              ":count"
+              (if s-var (list " :into " (syntax->datum s-var)) "")
+              (if s-by (list " :by " (syntax->datum s-by)) "")
+              " :if " (syntax->datum s-cond-expr))]
 
             [(setup)
-             (remove
-              #f
-              (list
-               (cond
-                [s-key #'(var make-hash-table)]
-                [else #'(var 0)])
-
-               ))]
+             (list #'(var 0))]
 
             [(iteration-body)
              (cons
-              (cond
-               [s-key
-                #'(when cond-expr
-                    (hashtable-update! var
-                                       key
-                                       (lambda (pre)
-                                         (fx+ pre 1))
-                                       0))
-                ]
-               [else
-                #'(when cond-expr
-                    (set! var (fx+ var 1)))])
-              (car args))
-             ]
-            [else (apply default-plugin #'make-collect-plugin method args)])))))
+              #'(when cond-expr
+                  (set! var (fx+ var by-expr)))
+              (car args))]
+
+            [else (apply default-plugin #'make-count-plugin method args)])))))
 
   (define (loop/core/count original-e)
     (let loop ([e original-e])
-      (syntax-case e (:count :group :by :if :when :unless :into :make-hash-table)
+      (syntax-case e (:count :if :when :unless :into :by)
+        ;; :count without :into defaults to :return-value
         [(k :count rest ...)
          (with-syntax ([return-value (loop-return-value #'k)])
            (loop #'(k (:count (:into . return-value)) rest ...)))]
-        [(k (:count (prop . value) ...) :by key rest ...)
-         (loop #'(k (:count (:by . key) (prop . value) ...) rest ...))
-         ]
 
+        ;; :count with :into
+        [(k (:count (prop . value) ...) :into var rest ...)
+         (loop #'(k (:count (:into . var) (prop . value) ...) rest ...))]
+
+        ;; :count with :by (step/increment)
+        [(k (:count (prop . value) ...) :by by-expr rest ...)
+         (loop #'(k (:count (:by . by-expr) (prop . value) ...) rest ...))]
+
+        ;; :count with :if
         [(k (:count (prop . value) ...) :if cond-expr rest ...)
-         (loop #'(k (:count (:if . cond-expr) (prop . value) ...) rest ...))
-         ]
+         (loop #'(k (:count (:if . cond-expr) (prop . value) ...) rest ...))]
 
+        ;; :count with :when (alias for :if)
         [(k (:count (prop . value) ...) :when cond-expr rest ...)
-         (loop #'(k (:count (:if . cond-expr) (prop . value) ...) rest ...))
-         ]
+         (loop #'(k (:count (:if . cond-expr) (prop . value) ...) rest ...))]
 
+        ;; :count with :unless
         [(k (:count (prop . value) ...) :unless cond-expr rest ...)
-         (loop #'(k (:count (:if . (not cond-expr)) (prop . value) ...) rest ...))
-         ]
+         (loop #'(k (:count (:if . (not cond-expr)) (prop . value) ...) rest ...))]
 
-        [(k (:group (prop . value) ...) :into var rest ...)
-         (loop #'(k (:group (:into . var) (prop . value) ...) rest ...))]
-
-        [(k (:count (prop . value) ...) :make-hash-table make-hash-table rest ...)
-         (loop #'(k (:count (:make-hash-table . make-hash-table) (prop . value) ...) rest ...))
-         ]
-
+        ;; Final: create the plugin
         [(k (:count (prop . value) ...) rest ...)
-         (values (make-count-by-plugin #'((prop . value) ...))
-                 #'(k rest ...))
-         ]
+         (values (make-count-plugin #'((prop . value) ...))
+                 #'(k rest ...))]
+
         [(k rest ...)
-         (values #f e)
-         ]))))
+         (values #f e)]))))

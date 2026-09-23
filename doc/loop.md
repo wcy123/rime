@@ -183,46 +183,57 @@ accumulate elements into a new variable other than `:return-value`.
 ## `:count`
 
 ```
-:count [:into <var>] [:if <cond>] [:unless <cond>] [:when <cond>] [:by <key>] [:make-hash-table]
+:count [:into <var>] [:by <expr>] [:if <cond>] [:unless <cond>] [:when <cond>]
 ```
 
-`count` clause set the `:return-value` to the number of iteration.
+The `:count` clause accumulates a count, defaulting to incrementing by 1 each iteration.
+
+**Basic counting (counts iterations):**
+
+```scheme
+(loop :for i :from 1 :to 5 :count)  ; => 5
+```
+
+**Conditional counting with `:if/:when/:unless`:**
 
 ```scheme
 (loop :for ch :in-string "Hello World"
-      :count :if (char-upper-case? ch)) ; => 2
+      :count :if (char-upper-case? ch))  ; => 2
+
+(loop :for i :from 1 :to 10
+      :count :when (even? i))  ; => 5
+
+(loop :for i :from 1 :to 10
+      :count :unless (< i 5))  ; => 6
 ```
 
-`:by` subclause is used to count into a hash table via `<key>`
+**Custom increment with `:by`:**
+
+By default, `:count` increments by 1. Use `:by <expr>` to increment by a different amount:
 
 ```scheme
-(define (sorted-ht ht)
-    (map
-     (lambda (k)
-       (cons k (hashtable-ref ht k #t)))
-     (list-sort char<? (vector->list (hashtable-keys ht)))))
-(sorted-ht
-   (loop :for ch :in-string "Hello World"
-      :count :by ch))
+(loop :for i :from 1 :to 5 :count :by 2)  ; => 10 (counts 5 times, adding 2 each)
 
-;; => ((#\space . 1) (#\H . 1) (#\W . 1) (#\d . 1) (#\e . 1) (#\l . 3) (#\o . 2) (#\r . 1))
-
-(define (sorted-ht ht)
-    (map
-     (lambda (k)
-       (cons k (hashtable-ref ht k #t)))
-     (list-sort string<? (vector->list (hashtable-keys ht)))))
-
-(sorted-ht
-  (loop :for str :in (map string (string->list "Hello World"))
-      :count :by str
-             :make-hash-table (make-hashtable string-hash string=?)))
-;; => ((" " . 1) ("H" . 1) ("W" . 1) ("d" . 1) ("e" . 1) ("l" . 3) ("o" . 2) ("r" . 1))
+(loop :for i :from 1 :to 5 :count :by i)  ; => 15 (sum: 1+2+3+4+5)
 ```
 
+**Count into variable with `:into`:**
 
-Similiar to `:append` and `:collect`, `:count <expr> :into <var>` set
-the `<var>` instead of `:return-value`
+```scheme
+(loop :for i :from 1 :to 10
+      :count :into evens :by i :if (even? i)
+      :count :into odds :by i :if (odd? i)
+      :finally (cons evens odds))  ; => (30 . 25)
+```
+
+**Practical example - weighted scoring:**
+
+```scheme
+(loop :for score :in '(80 90 100 70 60)
+      :for weight :in '(1 1 2 1 1)
+      :count :into total :by (* score weight)
+      :finally total)  ; => 500
+```
 
 ## `:do` clause
 
@@ -307,14 +318,13 @@ expression.
 `:return-value` can be used to access the current return value of the
 whole expression anywhere inside a loop expression.
 
-There are can be more than one `:finally` clauses, each of them are evaluated in order.
-
+**Note:** Only ONE `:finally` clause is supported. To chain multiple transformations, nest them:
 
 ```scheme
 (loop :for i :from 0 :to 2
       :collect i
-      :finally (map (lambda (x) (+ 100 x)) :return-value)
-      :finally (map (lambda (y) (+ 1000 y)) :return-value)) ; => (1100 1101 1102)
+      :finally (map (lambda (y) (+ 1000 y))
+                    (map (lambda (x) (+ 100 x)) :return-value))) ; => (1100 1101 1102)
 ```
 
 ## `:break` clause
