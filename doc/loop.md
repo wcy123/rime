@@ -463,7 +463,7 @@ more examples,
 
 ## `:recur` - Self-Updating Variables
 
-The `:recur` clause creates variables that update themselves on each loop step. Unlike normal loop variables (`:for`), `:recur` variables can depend on their own previous values.
+The `:recur` clause creates variables that automatically update themselves as the loop repeats. Unlike normal loop variables (`:for`), `:recur` variables can depend on their own previous values.
 
 ### Syntax
 
@@ -472,17 +472,17 @@ The `:recur` clause creates variables that update themselves on each loop step. 
 ```
 
 - `<var>` - Variable name that holds the evolving state
-- `<init-value>` - Initial value before the first iteration
-- `<next-value-expr>` - Expression to compute the next value (can reference the current iteration's variables)
+- `<init-value>` - Initial value before the loop starts
+- `<next-value-expr>` - Expression to compute the next value (can reference current loop variables)
 
 ### How It Works
 
 Each `:recur` clause creates a variable that:
-1. Starts with `<init-value>` before any iteration
-2. Updates to `<next-value-expr>` at the end of each iteration
-3. Can reference other iteration variables and other `:recur` variables
+1. Starts with `<init-value>` before the loop begins
+2. Gets updated to `<next-value-expr>` when moving to the next round
+3. Can reference other loop variables and other `:recur` variables
 
-Multiple `:recur` clauses can be used together, and they can reference each other (evaluation order follows declaration order).
+Multiple `:recur` clauses can work together, and they can reference each other (they update in declaration order).
 
 ### Example 1: Fibonacci Sequence
 
@@ -499,16 +499,16 @@ Computing Fibonacci numbers requires tracking two previous values:
 **Explanation:**
 - `x0` tracks the previous Fibonacci number (F[n-1])
 - `x` tracks the current Fibonacci number (F[n])
-- Each iteration: `x0` becomes old `x`, and `x` becomes `x0 + x`
+- After each round: `x0` becomes the old `x`, and `x` becomes `x0 + x`
 - We collect `x` to build the sequence
 
-**Step-by-step execution:**
+**Execution trace:**
 ```
-Initial:      x0=0,  x=1    → collect 1
-Iteration 1:  x0=1,  x=1    → collect 1
-Iteration 2:  x0=1,  x=2    → collect 2
-Iteration 3:  x0=2,  x=3    → collect 3
-Iteration 4:  x0=3,  x=5    → collect 5
+Round 1:  x0=0,  x=1    → collect 1, then update: x0←1, x←1
+Round 2:  x0=1,  x=1    → collect 1, then update: x0←1, x←2
+Round 3:  x0=1,  x=2    → collect 2, then update: x0←2, x←3
+Round 4:  x0=2,  x=3    → collect 3, then update: x0←3, x←5
+Round 5:  x0=3,  x=5    → collect 5, then update: x0←5, x←8
 ...
 ```
 
@@ -526,7 +526,7 @@ Computing factorial requires accumulating a product:
 **Explanation:**
 - `result` accumulates the product: 1 × 1 × 2 × 3 × 4 × 5 = 120
 - Initial value is 1 (multiplicative identity)
-- Each iteration multiplies `result` by the current `i`
+- Each round multiplies `result` by the current `i`
 
 ### Example 3: Running Sum
 
@@ -541,9 +541,9 @@ Creating a list of cumulative sums:
 
 **Explanation:**
 - We collect the sum **before** it's updated
-- Iteration 1: sum=0, then update to 0+1=1
-- Iteration 2: sum=1, then update to 1+2=3
-- Iteration 3: sum=3, then update to 3+3=6
+- Round 1: sum=0, collect 0, then update to 0+1=1
+- Round 2: sum=1, collect 1, then update to 1+2=3
+- Round 3: sum=3, collect 3, then update to 3+3=6
 - etc.
 
 ### Example 4: Powers of 2
@@ -559,7 +559,7 @@ Generating exponential sequences:
 
 **Explanation:**
 - Start with `power=1`
-- Each iteration doubles: 1 → 2 → 4 → 8 → 16 → ...
+- Each round doubles: 1 → 2 → 4 → 8 → 16 → ...
 
 ### Example 5: Sliding Window (Tracking Previous Value)
 
@@ -574,14 +574,14 @@ Pairing each element with its predecessor:
 
 **Explanation:**
 - `prev` starts as `#f` (no previous element yet)
-- Each iteration: `prev` becomes the previous iteration's `i`
+- Each round: `prev` becomes the previous round's `i`
 - Creates pairs showing the transition from one element to the next
 
 ### When to Use `:recur`
 
 Use `:recur` when you need to:
 - **Compute recurrence relations** (Fibonacci, factorial, etc.)
-- **Track state across iterations** (running totals, sliding windows)
+- **Track state across loop rounds** (running totals, sliding windows)
 - **Generate sequences** where each value depends on previous values
 - **Accumulate results** incrementally (when `:count`/`:collect` alone isn't enough)
 
@@ -609,7 +609,7 @@ The `:recur` clause expands to a named `let` binding:
   (if (>= iteration-count 3)
       result
       (let ([collected x])
-        (recur-loop (fx+ x 1)))))  ; Update x for next iteration
+        (recur-loop (fx+ x 1)))))  ; Recursive call with updated x
 ```
 ## named loop
 
