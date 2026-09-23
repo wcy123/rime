@@ -40,11 +40,17 @@ One-time setup before loop starts. Rarely used.
 
 **Level 2: RECUR-NAME with RECUR-BINDINGS** (named `let`)
 
-Stores **initial/constant** values. If you call `(RECUR-NAME ...)`, loop restarts from these values.
+Creates a function (via named `let`) with parameters from RECUR-BINDINGS. If you call `(RECUR-NAME ...)`, loop restarts with new parameter values.
 
-For `:for i :in '(1 2 3)`: stores the **original list** `'(1 2 3)`
+For `:for i :in '(1 2 3)`: `(let recur-name ([i-list-recur '(1 2 3)]) ...)` 
+- Expands to: `((letrec ([recur-name (lambda (i-list-recur) ...)]) recur-name) '(1 2 3))`
+- Parameter `i-list-recur` holds the **original list**
 
-For `:recur x := 1 :then (+ x 1)`: stores **initial value** `x = 1`
+For `:recur sum := 0 :then (+ sum 1)`: `(let recur-name ([sum 0]) ...)`
+- Expands to: `((letrec ([recur-name (lambda (sum) ...)]) recur-name) 0)`
+- Parameter `sum` holds the **initial value** 0
+
+**Key insight:** `'recur` method returns `((var init-value))` which becomes the lambda parameters `(lambda (var) ...)` with initial call `(...) init-value)`
 
 **Level 3: OUTER-BINDINGS** (anonymous `let*`)
 
@@ -52,11 +58,19 @@ Additional outer bindings. Rarely used.
 
 **Level 4: ITER-NAME with ITERATION-BINDINGS** (named `let`)
 
-Stores **current values** that change each iteration. Calling `(ITER-NAME STEP-EXPR)` advances to next iteration.
+Creates a function (via named `let`) with parameters from ITERATION-BINDINGS. Calling `(ITER-NAME STEP-EXPR)` advances to next iteration with updated parameter values.
 
-For `:for i :in '(1 2 3)`: stores **current list** that steps: `'(1 2 3)` → `'(2 3)` → `'(3)` → `'()`
+For `:for i :in '(1 2 3)`: `(let iter-name ([i-list-current i-list-recur]) ...)`
+- Expands to: `((letrec ([iter-name (lambda (i-list-current) ...)]) iter-name) i-list-recur)`
+- Parameter `i-list-current` steps: `'(1 2 3)` → `'(2 3)` → `'(3)` → `'()`
+- Each recursive call: `(iter-name (cdr i-list-current))`
 
-For `:recur x := 1 :then (+ x 1)`: stores **current value** that steps: `1` → `2` → `3` → ...
+For `:recur sum := 0 :then (+ sum i)`: `(let iter-name ([sum sum]) ...)`
+- Expands to: `((letrec ([iter-name (lambda (sum) ...)]) iter-name) sum)`
+- Parameter `sum` steps: `0` → `1` → `3` → `6` → ...
+- Each recursive call: `(iter-name (+ sum i))`
+
+**Key insight:** `'iteration` method returns `((var init-value step-expr))` which becomes the lambda parameters `(lambda (var) ...)`, initial call `(...) init-value`, and recursive call `(...) step-expr)`
 
 **Level 5: INNER-BINDINGS** (anonymous `let*`)
 
