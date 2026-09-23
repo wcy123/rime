@@ -25,14 +25,19 @@ all:
 test: test-chez test-guile test-standalone
 	@echo; echo "MAKE: TEST FINISH $(TEST_CASES)"
 
-# Standalone script tests - catch bugs that unit tests miss
-STANDALONE_TESTS := $(wildcard test/standalone/*.scm)
+# Standalone script tests - catch bugs that unit tests miss (e.g., keyword registration)
+# These are .scm files (not .sls) that run as standalone scripts
+STANDALONE_TESTS := $(shell find test -name "*-standalone.scm" -type f 2>/dev/null)
 test-standalone:
 	@echo "[ test-standalone ] Running standalone script tests"
-	@for script in $(STANDALONE_TESTS); do \
-		echo "  Running $$script..."; \
-		"$(CHEZ)" --script $$script || exit 1; \
-	done
+	@if [ -z "$(STANDALONE_TESTS)" ]; then \
+		echo "  No standalone tests found"; \
+	else \
+		for script in $(STANDALONE_TESTS); do \
+			echo "  Running $$script..."; \
+			"$(CHEZ)" --script $$script || exit 1; \
+		done; \
+	fi
 	@echo "[ test-standalone ] All standalone tests passed"
 
 

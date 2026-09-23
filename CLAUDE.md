@@ -59,7 +59,7 @@ Keyword registration bugs (like missing `:step`) are **NOT caught by unit tests*
 
 For keyword registration bugs, use standalone tests:
 
-1. **Create test in** `test/standalone/<feature>.scm`:
+1. **Create test** in `test/rime/loop/<feature>-standalone.scm`:
    ```scheme
    #!r6rs
    (import (rnrs (6)) (rime loop))
@@ -69,6 +69,10 @@ For keyword registration bugs, use standalone tests:
          (begin (display "PASS\n") (exit 0))
          (begin (display "FAIL\n") (exit 1))))
    ```
+   
+   **Naming convention**: `*-standalone.scm` (not `.sls`)
+   - Placed alongside regular tests in `test/rime/loop/`
+   - Discovered automatically by `make test-standalone`
 
 2. **Run standalone tests**: `make test-standalone`
 
@@ -123,7 +127,8 @@ When adding a new keyword (e.g., `:step`):
    (syntax-case e (:count ... :step ...))
    ```
 
-6. **CREATE STANDALONE TEST FIRST** in `test/standalone/test-<keyword>.scm`:
+6. **CREATE STANDALONE TEST FIRST** in `test/rime/loop/<keyword>-standalone.scm`:
+   - Naming: `*-standalone.scm` to distinguish from `.sls` unit tests
    - Test should FAIL without keyword registration
    - Proves the bug exists
    - Will pass after fix is applied
@@ -141,8 +146,9 @@ When adding a new keyword (e.g., `:step`):
   - `core.sls` - Parser and code generator
   - `keywords.sls` - Keyword definitions
   - `<feature>.sls` - Individual feature plugins (count, collect, etc.)
-- `test/rime/loop/` - Unit test files for each feature
-- `test/standalone/` - Standalone script tests (catch keyword bugs)
+- `test/rime/loop/` - Test files
+  - `*-test.sls` - Unit tests for each feature
+  - `*-standalone.scm` - Standalone script tests (catch keyword bugs)
 - `doc/loop.md` - User documentation with examples
 
 ## Code Style
