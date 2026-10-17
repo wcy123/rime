@@ -40,11 +40,17 @@ One-time setup before loop starts. Rarely used.
 
 **Level 2: RECUR-NAME with RECUR-BINDINGS** (named `let`)
 
-Stores **initial/constant** values. If you call `(RECUR-NAME ...)`, loop restarts from these values.
+Creates a function (via named `let`) with parameters from RECUR-BINDINGS. If you call `(RECUR-NAME ...)`, loop restarts with new parameter values.
 
-For `:for i :in '(1 2 3)`: stores the **original list** `'(1 2 3)`
+For `:for i :in '(1 2 3)`: `(let recur-name ([i-list-recur '(1 2 3)]) ...)` 
+- Expands to: `((letrec ([recur-name (lambda (i-list-recur) ...)]) recur-name) '(1 2 3))`
+- Parameter `i-list-recur` holds the **original list**
 
-For `:recur x := 1 :then (+ x 1)`: stores **initial value** `x = 1`
+For `:recur sum := 0 :then (+ sum 1)`: `(let recur-name ([sum 0]) ...)`
+- Expands to: `((letrec ([recur-name (lambda (sum) ...)]) recur-name) 0)`
+- Parameter `sum` holds the **initial value** 0
+
+**Key insight:** `'recur` method returns `((var init-value))` which becomes the lambda parameters `(lambda (var) ...)` with initial call `(...) init-value)`
 
 **Level 3: OUTER-BINDINGS** (anonymous `let*`)
 
@@ -52,11 +58,19 @@ Additional outer bindings. Rarely used.
 
 **Level 4: ITER-NAME with ITERATION-BINDINGS** (named `let`)
 
-Stores **current values** that change each iteration. Calling `(ITER-NAME STEP-EXPR)` advances to next iteration.
+Creates a function (via named `let`) with parameters from ITERATION-BINDINGS. Calling `(ITER-NAME STEP-EXPR)` advances to next iteration with updated parameter values.
 
-For `:for i :in '(1 2 3)`: stores **current list** that steps: `'(1 2 3)` → `'(2 3)` → `'(3)` → `'()`
+For `:for i :in '(1 2 3)`: `(let iter-name ([i-list-current i-list-recur]) ...)`
+- Expands to: `((letrec ([iter-name (lambda (i-list-current) ...)]) iter-name) i-list-recur)`
+- Parameter `i-list-current` steps: `'(1 2 3)` → `'(2 3)` → `'(3)` → `'()`
+- Each recursive call: `(iter-name (cdr i-list-current))`
 
-For `:recur x := 1 :then (+ x 1)`: stores **current value** that steps: `1` → `2` → `3` → ...
+For `:recur sum := 0 :then (+ sum i)`: `(let iter-name ([sum sum]) ...)`
+- Expands to: `((letrec ([iter-name (lambda (sum) ...)]) iter-name) sum)`
+- Parameter `sum` steps: `0` → `1` → `3` → `6` → ...
+- Each recursive call: `(iter-name (+ sum i))`
+
+**Key insight:** `'iteration` method returns `((var init-value step-expr))` which becomes the lambda parameters `(lambda (var) ...)`, initial call `(...) init-value`, and recursive call `(...) step-expr)`
 
 **Level 5: INNER-BINDINGS** (anonymous `let*`)
 
@@ -141,6 +155,77 @@ This expands to:
 Both follow the same pattern:
 - **`recur`**: initial/constant value (restart point)
 - **`iteration`**: current value that steps forward
+
+### Concrete Example 3: `:recur` Clause
+
+User writes:
+
+```scheme
+(loop :for i :from 1 :to 3
+      :recur sum := 0 :then (fx+ sum i)
+      :collect (cons sum i))
+;; => ((0 . 1) (1 . 2) (3 . 3))
+```
+
+Actual expansion (from `expand`, cleaned up):
+
+```scheme
+(let ([:return-value '()])
+  (let ([:collector ...]
+        [:extractor ...])
+
+    ;; OUTER letrec: defines g1 function for :recur bindings
+    ((letrec ([g1 (lambda (sum)              ; g1 takes :recur variable sum
+
+                    ;; INNER letrec: defines g0 function for :for bindings  
+                    ((letrec ([g0 (lambda (i sum)    ; g0 takes :for variable i + sum
+                                    (if (fx<=? i 3)
+                                        (begin
+                                          (:collector (cons sum i))
+                                          ;; Recursive call to g0 (INNER)
+                                          (g0 (fx+ i 1)      ; Step i
+                                              (fx+ sum i)))  ; Step sum
+                                        :return-value))])
+                       g0)    ; Return g0 function
+                     1        ; Call g0 with i=1
+                     sum))])  ; and sum from outer g1
+       g1)    ; Return g1 function  
+     0)))     ; Call g1 with sum=0
+```
+
+**Execution trace:**
+
+```
+Start:   g1(sum=0) → returns g0, then calls g0(i=1, sum=0)
+Round 1: g0(i=1, sum=0) → collect (0 . 1) → g0(i=2, sum=1)
+Round 2: g0(i=2, sum=1) → collect (1 . 2) → g0(i=3, sum=3)
+Round 3: g0(i=3, sum=3) → collect (3 . 3) → g0(i=4, sum=6)
+Round 4: g0(i=4, sum=6) → (fx<=? 4 3) is false → return result
+```
+
+**Key observations:**
+
+1. **Two nested `letrec` forms:**
+   - Outer `g1`: binds `:recur sum` parameter
+   - Inner `g0`: binds `:for i` parameter (and receives `sum`)
+
+2. **We only ever call `g0` during the loop**
+   - `g1` is called once: `g1(0)` which sets up `sum=0`
+   - `g0` is called repeatedly: `g0(1,0) → g0(2,1) → g0(3,3) → g0(4,6)`
+
+3. **Answer to "why need outer `g1`?"**
+   
+   In this simple example, `g1` is only called once at startup. But when you use **`:name recur`**, you can explicitly call `g1` to **restart the entire loop** with new `:recur` values:
+
+   ```scheme
+   (loop :name restart
+         :recur depth := 0
+         :for item :in items
+         :do (restart (+ depth 1) item) :if (list? item)  ; Calls g1!
+         :collect item :unless (list? item))
+   ```
+
+   Here, `:do (restart ...)` calls `g1` with a new `depth` value, which then creates a fresh `g0` iteration starting from the first item. This enables recursive tree/graph traversal.
 
 ---
 
