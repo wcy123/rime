@@ -23,6 +23,8 @@ accessor for the options and the positional arguments. It works on Chez Scheme a
 (option 0)                             ; => "x"
 ```
 
+A runnable version is in `example/command-line-options.scm`.
+
 # Defining options
 
 ```scheme
