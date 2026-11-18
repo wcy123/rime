@@ -810,29 +810,46 @@
       (CHECK equal? (option "-u") "-H")))
 
   ;; The real -h path of a macro-defined parser prints usage and calls (exit 0).
-  ;; Chez only: exit-handler and current-output-port are intercepted through eval
-  ;; (cf. rime/rime-0/__feature-registry.sls); on other implementations the test is skipped.
-  (define chez-environment
-    (guard (e [else #f]) (environment '(chezscheme))))
+  ;; exit and the output port are intercepted through eval in an implementation specific
+  ;; environment (cf. rime/rime-0/__feature-registry.sls); the test is skipped elsewhere.
+  (define (try-environment import-spec)
+    (guard (e [else #f]) (environment import-spec)))
 
-  ;; (run-capturing-exit thunk) => (exit-code . printed-text), or #f when not on Chez
+  (define chez-environment (try-environment '(chezscheme)))
+  (define guile-environment (try-environment '(guile)))
+
+  ;; (run-capturing-exit thunk) => (exit-code . printed-text), or #f when unsupported
   (define run-capturing-exit
-    (and chez-environment
-         (eval '(lambda (thunk)
-                  (let* ([exit-code 'exit-not-called]
-                         [output
-                          (call-with-string-output-port
-                           (lambda (port)
-                             (parameterize ([current-output-port port])
-                               (call/cc
-                                (lambda (return)
-                                  (parameterize ([exit-handler
-                                                  (lambda codes
-                                                    (set! exit-code (if (null? codes) 0 (car codes)))
-                                                    (return #f))])
-                                    (thunk)))))))])
-                    (cons exit-code output)))
-               chez-environment)))
+    (cond
+     [chez-environment
+      (eval '(lambda (thunk)
+               (let* ([exit-code 'exit-not-called]
+                      [output
+                       (call-with-string-output-port
+                        (lambda (port)
+                          (parameterize ([current-output-port port])
+                            (call/cc
+                             (lambda (return)
+                               (parameterize ([exit-handler
+                                               (lambda codes
+                                                 (set! exit-code (if (null? codes) 0 (car codes)))
+                                                 (return #f))])
+                                 (thunk)))))))])
+                 (cons exit-code output)))
+            chez-environment)]
+     [guile-environment
+      (eval '(lambda (thunk)
+               (let* ([exit-code 'exit-not-called]
+                      [output
+                       (with-output-to-string
+                         (lambda ()
+                           (catch 'quit
+                             thunk
+                             (lambda (key . codes)
+                               (set! exit-code (if (null? codes) 0 (car codes)))))))])
+                 (cons exit-code output)))
+            guile-environment)]
+     [else #f]))
 
   (define-command-line-options helpful
     ["-v" :long "--verbose" :arity 0 :description "verbose output"]

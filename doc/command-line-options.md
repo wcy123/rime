@@ -287,4 +287,5 @@ Exception in opt-parser: option does not take arguments with irritant "--verbose
 # Tests
 
 `test/rime/command-line-options-test.sls`, run with `make test-chez/rime/command-line-options-test`
-(or `make test-chez` for everything). The real `-h` path, which calls `exit`, is only exercised on Chez.
+(or `make test-chez` for everything), and the same with `test-guile`. The real `-h` path, which calls `exit`,
+is exercised on Chez and on Guile.
