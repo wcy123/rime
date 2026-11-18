@@ -27,6 +27,9 @@
           (rime loop directory)
           )
 
+  ;; loop/core/loop and loop/core/finally are defined later in this library and are mutually
+  ;; recursive with all-plugins; Guile 3.0.1 stores the wrong closure for a direct reference,
+  ;; so wrap them in lambdas.
   (define (all-plugins)
     (list (cons 'loop/core/arithmetic loop/core/arithmetic)
           (cons 'loop/core/list loop/core/list)
@@ -39,9 +42,9 @@
           (cons 'loop/core/recur loop/core/recur)
           (cons 'loop/core/collect loop/core/collect)
           (cons 'loop/core/break loop/core/break)
-          (cons 'loop/core/finally loop/core/finally)
+          (cons 'loop/core/finally (lambda (e) (loop/core/finally e)))
           (cons 'loop/core/initially loop/core/initially)
-          (cons 'loop/core/loop loop/core/loop)
+          (cons 'loop/core/loop (lambda (e) (loop/core/loop e)))
           (cons 'loop/core/join-string loop/core/join-string)
           (cons 'loop/core/group-by loop/core/group-by)
           (cons 'loop/core/count loop/core/count)
