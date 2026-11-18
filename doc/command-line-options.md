@@ -9,9 +9,9 @@ accessor for the options and the positional arguments. It works on Chez Scheme a
 (import (rnrs (6)) (rime command-line-options))
 
 (define-command-line-options parse
-  ["-v" :long "--verbose" :arity 0 :description "print more details"]
-  ["-n" :long "--count"   :arity 1 :type int :description "number of repetitions"]
-  ["-e" :long "--exclude" :arity (1 +) :description "patterns to exclude"])
+  [:short "-v" :long "--verbose" :arity 0 :description "print more details"]
+  [:short "-n" :long "--count"   :arity 1 :type int :description "number of repetitions"]
+  [:short "-e" :long "--exclude" :arity (1 +) :description "patterns to exclude"])
 
 (define option (parse (cdr (command-line))))   ; for `prog -v --count 3 -e a b -- x`
 
@@ -29,7 +29,7 @@ A runnable version is in `example/command-line-options.scm`.
 
 ```scheme
 (define-command-line-options <parser>
-  [<name> <field> ...]
+  [<field> ...]
   ...)
 ```
 
@@ -38,27 +38,50 @@ the list of command line arguments (without the program name).
 
 | field                | meaning                                                    | default    |
 |----------------------|------------------------------------------------------------|------------|
-| `<name>`             | short name, first in the clause, `"-b"`, required         |            |
+| `:short "-b"`        | short name                                                 | none       |
 | `:long "--long-name"`| long name                                                  | none       |
 | `:arity <arity>`     | how many arguments the option takes                        | `1`        |
 | `:type <type>`       | how to convert each argument, not allowed with arity `0`   | `string`   |
 | `:description "..."` | text shown by `--help`                                     | empty      |
 
-The keywords `:long :arity :type :description` are exported by the library, so import it whole
+The keywords `:short :long :arity :type :description` are exported by the library, so import it whole
 (`(import (rime command-line-options))`); `(only (rime command-line-options) define-command-line-options)`
 would leave them unbound and the clauses would be rejected.
 
-Fields can be written in any order. Mistakes in the definition (unknown field, duplicated
-name, `:type` on a flag, `min > max`, ...) are reported when the program is compiled,
+Fields can be written in any order. An option needs a `:short` name, a `:long` name, or both.
+Mistakes in the definition (unknown field, no name, duplicated name, `:type` on a flag, `min > max`, ...) are reported when the program is compiled,
 as syntax violations.
 
 ## Names
 
-Option names are strings: `"-b"` (a single dash) and `"--long-name"` (two dashes).
+Option names are strings: `:short "-b"` (a single dash) and `:long "--long-name"` (two dashes).
 Names must not contain `=`, `,` or whitespace. `-h` and `--help` are reserved.
 There is no clustering, `-vq` is an unknown option, not `-v -q`.
 
-Symbols are accepted too, `[-b :long --long-name]` and `(option '-b)`, but
+Both names are optional, but an option needs at least one. An option does not need a one-letter
+name, so there is no limit of one option per letter: a program can have any number of
+options that only have a long name.
+
+```scheme
+(define-command-line-options parse
+  [:short "-q" :arity 0 :description "quiet"]               ; short name only
+  [:long "--retries" :type int :description "retry count"]  ; long name only
+  [:short "-o" :long "--output" :description "output file"]) ; both
+```
+
+Its usage table (`-h`), with a long name alone lined up under the long names:
+
+```
+Usage: prog [options] [--] [arguments...]
+
+Options:
+  -q                     quiet
+      --retries <int>    retry count
+  -o, --output <string>  output file
+  -h, --help             show this help message and exit
+```
+
+Symbols are accepted too, `[:short -b :long --long-name]` and `(option '-b)`, but
 strict R6RS readers (every `.sls` file on Chez, and files starting with `#!r6rs`) refuse
 to read `-b` or `--long-name` as symbols. Strings work everywhere, use them in portable code.
 
@@ -71,7 +94,7 @@ to read `-b` or `--long-name` as symbols. Strings work everywhere, use them in p
 | `(min max)` |                 | between `min` and `max` arguments                    |
 | `(min +)`   | `(min max-fixnum)` | at least `min`, no upper bound                    |
 
-`(min +)` stands for the `(min,)` notation, since `,` already means `unquote` in Scheme.
+`(min +)` stands for the `(min,)` notation, since `,` already means `unquote` in Scheme. The `+` is matched as the ordinary `+` of `(rnrs)`, so it has to be that binding.
 
 ## Types
 
@@ -214,13 +237,13 @@ The examples above were run with this program (`grep-lite.scm`), with
 (import (rnrs (6)) (rime command-line-options))
 
 (define-command-line-options parse
-  ["-v" :long "--verbose" :arity 0 :description "print more details"]
-  ["-n" :long "--count"   :arity 1 :type int :description "number of repetitions"]
-  ["-r" :long "--ratio"   :type float :description "sampling ratio"]
-  ["-c" :long "--color"   :type bool :description "colored output (yes/no/on/off/true/false/1/0)"]
-  ["-e" :long "--exclude" :arity (1 +) :description "patterns to exclude"]
-  ["-w" :long "--window"  :arity (0 2) :type int :description "context lines before [and after]"]
-  ["-t" :long "--tag"     :type (lambda (s) (string-append "<" s ">")) :description "custom conversion"])
+  [:short "-v" :long "--verbose" :arity 0 :description "print more details"]
+  [:short "-n" :long "--count"   :arity 1 :type int :description "number of repetitions"]
+  [:short "-r" :long "--ratio"   :type float :description "sampling ratio"]
+  [:short "-c" :long "--color"   :type bool :description "colored output (yes/no/on/off/true/false/1/0)"]
+  [:short "-e" :long "--exclude" :arity (1 +) :description "patterns to exclude"]
+  [:short "-w" :long "--window"  :arity (0 2) :type int :description "context lines before [and after]"]
+  [:short "-t" :long "--tag"     :type (lambda (s) (string-append "<" s ">")) :description "custom conversion"])
 
 (define option (parse (cdr (command-line))))
 (for-each (lambda (name) (write name) (display " => ") (write (option name)) (newline))
@@ -292,28 +315,32 @@ Exception in opt-parser: option does not take arguments with irritant "--verbose
 
 # Implementation
 
-Syntax and semantics are kept apart. A clause is first parsed into an `option-ast` record, which
-says what the option means and knows nothing about how it was written; code is then generated
-from the records only.
+Reading and writing are separate steps, and syntax and semantics are kept apart. The clauses are
+first read into `option-ast` records, which say what each option means and know nothing about how
+it was written; the definition is then written from the records only. The same record type is
+used at runtime: the generated code builds the records again and `__runtime.sls` works with them.
+The exported macro is just those two calls.
 
-| file (`rime/command-line-options/`) | job                                                                         |
-|-------------------------------------|-----------------------------------------------------------------------------|
-| `../command-line-options.sls`       | the exported macro; walks the clauses and runs the two phases               |
-| `__parse.sls`                       | phase 1, syntax -> AST: reads the clauses, checks they are well formed      |
-| `__ast.sls`                         | the AST record, and the semantic rules (names, arity, type, duplicates)     |
-| `__codegen.sls`                     | phase 2, AST -> code: generates the definition, never reads user syntax     |
-| `__parser.sls`                      | the runtime: parses the command line, builds the accessor, prints the usage |
+| file (`rime/command-line-options/`) | job                                                                          |
+|-------------------------------------|------------------------------------------------------------------------------|
+| `../command-line-options.sls`       | the exported macro: `(generate-definition parser (parse-options clauses))`   |
+| `__parse.sls`                       | phase 1, read: walks the clauses and fields by pattern matching, builds records |
+| `__ast.sls`                         | the `option-ast` record, and the semantic rules (names, arity, converter, duplicates) |
+| `__codegen.sls`                     | phase 2, write: generates the definition, which builds the same records again at runtime; never reads user syntax |
+| `__keywords.sls`                    | the field keywords `:short :long :arity :type :description`                  |
+| `__runtime.sls`                      | the runtime: parses the command line, builds the accessor, prints the usage; the builtin converters |
 
-Adding a field to the clause syntax means a field in the record and a rule in `__ast.sls` if it
-has one, a parse rule in `__parse.sls`, and a line in `__codegen.sls`.
+Adding a builtin type means a converter and one entry in `builtin-converters`, both in `__runtime.sls`.
+Adding a field to the clause syntax means a keyword in `__keywords.sls` and a pattern in `__parse.sls`,
+a field in the record and a rule in `__ast.sls` if it has one, and a line in `__codegen.sls`.
 
 # Tests
 
 Each module has its own test file, `make test-chez/rime/command-line-options/<name>`:
 
-* `test/rime/command-line-options/__parse-test.sls`: syntax to AST
+* `test/rime/command-line-options/__parse-test.sls`: reading, syntax to AST
 * `test/rime/command-line-options/__ast-test.sls`: the semantic rules, on records built by hand
-* `test/rime/command-line-options/__codegen-test.sls`: AST to code, on records built by hand
+* `test/rime/command-line-options/__codegen-test.sls`: writing, AST to code, on records built by hand
 * `test/rime/command-line-options-test.sls`: the macro and the parser end to end
 
 `make test-chez` runs everything, and the same with `test-guile`. The real `-h` path, which calls `exit`,

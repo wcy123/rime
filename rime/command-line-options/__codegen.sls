@@ -6,33 +6,7 @@
   (export generate-definition)
   (import (rnrs (6))
           (rime command-line-options __ast)
-          (rime command-line-options __parser))
-
-  (define (converter-for option)
-    (case (or (option-ast-type option) 'string)
-      [(string) #'convert-string]
-      [(int) #'convert-int]
-      [(float) #'convert-float]
-      [(bool) #'convert-bool]
-      [else (option-ast-converter option)]))
-
-  ;; the type name is only shown in the usage text
-  (define (type-name-for option)
-    (let ([type (or (option-ast-type option) 'string)])
-      (and (not (eq? type 'custom)) type)))
-
-  ;; an expression that makes the option-spec the runtime (__parser.sls) works with
-  (define (option->spec-expression option)
-    (with-syntax ([short (datum->syntax #'here (option-ast-short option))]
-                  [long (datum->syntax #'here (option-ast-long option))]
-                  [min (datum->syntax #'here (option-ast-min option))]
-                  [max (if (option-ast-max option)
-                           (datum->syntax #'here (option-ast-max option))
-                           #'(greatest-fixnum))]
-                  [type-name (datum->syntax #'here (type-name-for option))]
-                  [converter (converter-for option)]
-                  [description (datum->syntax #'here (option-ast-description option))])
-      #'(make-option-spec short long min max 'type-name converter description)))
+          (rime command-line-options __runtime))
 
   ;; parser: the identifier to define; options: list of option-ast
   (define (generate-definition parser options)
@@ -41,4 +15,16 @@
       #'(define parser
           (let ([specs (list spec ...)])
             (lambda (arguments)
-              (parse-command-line specs arguments)))))))
+              (parse-command-line specs arguments))))))
+
+  ;; an expression that builds the same option-ast again, at runtime, for the runtime (__runtime.sls)
+  ;; to work with: the values are emitted as they are, and the source is not needed there.
+  ;; The converter is emitted as the AST has it, #f (no converter) means the text as it is.
+  (define (option->spec-expression option)
+    (with-syntax ([short (datum->syntax #'here (option-ast-short option))]
+                  [long (datum->syntax #'here (option-ast-long option))]
+                  [min (datum->syntax #'here (option-ast-min option))]
+                  [max (datum->syntax #'here (option-ast-max option))]
+                  [converter (or (option-ast-converter option) #'#f)]
+                  [description (datum->syntax #'here (option-ast-description option))])
+      #'(make-option-ast short long min max converter description #f))))

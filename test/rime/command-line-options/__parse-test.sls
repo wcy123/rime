@@ -4,6 +4,7 @@
   (export main)
   (import (rnrs (6))
           (rime unit-test)
+          (rime command-line-options __keywords)
           (rime command-line-options __ast)
           (rime command-line-options __parse))
 
@@ -19,10 +20,17 @@
   ;; names given as symbols, which strict R6RS readers cannot read as literals
   (define (sym s) (string->symbol s))
 
-  (define (clause . datums) (datum->syntax #'here datums))
+  ;; a clause as the user writes it: :key value :key value ...
+  ;; `short` becomes the :short field, #f means none; each field is given as a list, (:long "--x");
+  ;; the keywords are bound by the import above
+  (define (clause short . fields)
+    (append (if short (list ':short short) '()) (apply append fields)))
+
+  ;; the syntax of a list of clauses, as define-command-line-options receives them
+  (define (clauses . clauses) (datum->syntax #'here clauses))
 
   ;; the single option of one clause
-  (define (parse . datums) (car (parse-options (list (apply clause datums)))))
+  (define (parse . datums) (car (parse-options (clauses (apply clause datums)))))
 
   (define (parse-fails? . datums)
     (raises-syntax-violation? (lambda () (apply parse datums))))
@@ -37,7 +45,6 @@
       (CHECK equal? (option-ast-long o) #f)
       (CHECK equal? (option-ast-min o) 1)
       (CHECK equal? (option-ast-max o) 1)
-      (CHECK equal? (option-ast-type o) #f)
       (CHECK equal? (option-ast-converter o) #f)
       (CHECK equal? (option-ast-description o) "")))
 
@@ -47,15 +54,52 @@
       (CHECK equal? (option-ast-long o) "--count")
       (CHECK equal? (option-ast-min o) 0)
       (CHECK equal? (option-ast-max o) 2)
-      (CHECK equal? (option-ast-type o) 'int)
-      (CHECK equal? (option-ast-converter o) #f)
+      (CHECK equal? (syntax->datum (option-ast-converter o)) '(builtin-converter 'int))
       (CHECK equal? (option-ast-description o) "repeat")))
 
   (define-test test-fields-in-any-order
     (let ([o (parse "-n" '(:description "d") '(:type float) '(:long "--n-long"))])
       (CHECK equal? (option-ast-long o) "--n-long")
-      (CHECK equal? (option-ast-type o) 'float)
+      (CHECK equal? (syntax->datum (option-ast-converter o)) '(builtin-converter 'float))
       (CHECK equal? (option-ast-description o) "d")))
+
+  (define-test test-short-only
+    (let ([o (parse "-a")])
+      (CHECK equal? (option-ast-short o) "-a")
+      (CHECK equal? (option-ast-long o) #f)))
+
+  (define-test test-long-only
+    (let ([o (parse #f '(:long "--alpha"))])
+      (CHECK equal? (option-ast-short o) #f)
+      (CHECK equal? (option-ast-long o) "--alpha")))
+
+  (define-test test-short-and-long-given-in-either-order
+    (let ([a (parse "-a" '(:long "--alpha"))]
+          [b (parse-options (clauses '(:long "--alpha" :short "-a")))])
+      (CHECK equal? (option-ast-short a) "-a")
+      (CHECK equal? (option-ast-long a) "--alpha")
+      (CHECK equal? (option-ast-short (car b)) "-a")
+      (CHECK equal? (option-ast-long (car b)) "--alpha")))
+
+  (define-test test-no-name-at-all-is-a-violation
+    (CHECK eq? (parse-fails? #f) #t)
+    (CHECK eq? (parse-fails? #f '(:arity 0)) #t)
+    (CHECK eq? (parse-fails? #f '(:description "d")) #t))
+
+  (define-test test-short-and-long-fields-are-checked
+    (CHECK eq? (parse-fails? #f '(:short 42)) #t)
+    (CHECK eq? (parse-fails? #f '(:short "x")) #t)
+    (CHECK eq? (parse-fails? "-a" '(:short "-b")) #t)
+    (CHECK eq? (parse-fails? #f '(:long "--a") '(:long "--b")) #t))
+
+  (define-test test-options-with-only-a-long-name-may-share-nothing
+    (CHECK eq? (raises-syntax-violation?
+                (lambda () (parse-options (clauses (clause #f '(:long "--x"))
+                                                   (clause #f '(:long "--x"))))))
+           #t)
+    (CHECK equal? (map option-ast-long
+                       (parse-options (clauses (clause #f '(:long "--x")) (clause #f '(:long "--y")))))
+           '("--x" "--y")))
 
   (define-test test-names-as-symbols
     (let ([o (parse (sym "-a") (list ':long (sym "--alpha")))])
@@ -64,7 +108,7 @@
 
   (define-test test-source-is-the-clause
     (let ([o (parse "-a" '(:arity 2))])
-      (CHECK equal? (syntax->datum (option-ast-source o)) '("-a" (:arity 2)))))
+      (CHECK equal? (syntax->datum (option-ast-source o)) '(:short "-a" :arity 2))))
 
   (define (min+max . arity)
     (let ([o (apply parse "-a" (if (null? arity) '() (list (list ':arity (car arity)))))])
@@ -76,36 +120,35 @@
     (CHECK equal? (min+max 3) '(3 . 3))
     (CHECK equal? (min+max '(1 2)) '(1 . 2))
     (CHECK equal? (min+max '(2 2)) '(2 . 2))
-    (CHECK equal? (min+max '(0 +)) '(0 . #f))
-    (CHECK equal? (min+max '(2 +)) '(2 . #f)))
+    (CHECK equal? (min+max '(0 +)) (cons 0 unlimited))
+    (CHECK equal? (min+max '(2 +)) (cons 2 unlimited)))
 
-  (define-test test-builtin-types
+  (define-test test-builtin-types-become-a-lookup-of-the-converter
     (for-each
      (lambda (type)
        (let ([o (parse "-a" (list ':type type))])
-         (CHECK eq? (option-ast-type o) type)
-         (CHECK eq? (option-ast-converter o) #f)))
+         (CHECK equal? (syntax->datum (option-ast-converter o))
+                (list 'builtin-converter (list 'quote type)))))
      '(string int float bool)))
 
-  (define-test test-custom-type-keeps-its-expression
+  (define-test test-custom-converter-keeps-its-expression
     (let ([o (parse "-a" '(:type (lambda (s) s)))])
-      (CHECK eq? (option-ast-type o) 'custom)
       (CHECK equal? (syntax->datum (option-ast-converter o)) '(lambda (s) s))))
 
-  (define-test test-custom-type-may-be-an-identifier
+  (define-test test-custom-converter-may-be-an-identifier
     (let ([o (parse "-a" '(:type string-upcase))])
-      (CHECK eq? (option-ast-type o) 'custom)
+      ;; the identifier as it is, not a lookup by name: only string int float bool are builtin
       (CHECK equal? (syntax->datum (option-ast-converter o)) 'string-upcase)))
 
-  (define-test test-flag-has-no-type
-    (CHECK eq? (option-ast-type (parse "-a" '(:arity 0))) #f))
+  (define-test test-flag-has-no-converter
+    (CHECK eq? (option-ast-converter (parse "-a" '(:arity 0))) #f))
 
   (define-test test-several-clauses-keep-their-order
-    (let ([options (parse-options (list (clause "-a") (clause "-b") (clause "-c")))])
+    (let ([options (parse-options (clauses (clause "-a") (clause "-b") (clause "-c")))])
       (CHECK equal? (map option-ast-short options) '("-a" "-b" "-c"))))
 
   (define-test test-no-clauses
-    (CHECK equal? (parse-options '()) '()))
+    (CHECK equal? (parse-options (clauses)) '()))
 
   ;; ========================================
   ;; what is not a well formed clause
@@ -120,7 +163,7 @@
     (for-each
      (lambda (bad)
        (CHECK eq? (parse-fails? "-a" (list ':arity bad)) #t))
-     '(-1 many (1 2 3) (1) () (-1 2) (1 -2) (1 many) 1.5)))
+     '(-1 many (1 2 3) (1) () (-1 2) (1 -2) (1 many) 1.5 (+ 1) (+ +) (1 . 2) +)))
 
   (define-test test-description-must-be-a-string
     (CHECK eq? (parse-fails? "-a" '(:description 42)) #t)
@@ -128,6 +171,53 @@
 
   (define-test test-unknown-field
     (CHECK eq? (parse-fails? "-a" '(:colour red)) #t))
+
+  (define-test test-field-without-a-value
+    (CHECK eq? (parse-fails? "-a" '(:long)) #t)
+    (CHECK eq? (parse-fails? "-a" '(:arity 1) '(:type)) #t))
+
+  (define-test test-something-that-is-not-a-keyword-in-field-position
+    (CHECK eq? (raises-syntax-violation?
+                (lambda () (parse-options (clauses '(:short "-a" 42)))))
+           #t)
+    (CHECK eq? (raises-syntax-violation?
+                (lambda () (parse-options (clauses '(:short "-a" "--long" "--x")))))
+           #t))
+
+  (define-test test-improper-clause-or-fields
+    ;; the tail of the clause is not a list of fields
+    (CHECK eq? (raises-syntax-violation?
+                (lambda () (parse-options (clauses (cons ':short (cons "-a" 5))))))
+           #t)
+    (CHECK eq? (raises-syntax-violation?
+                (lambda () (parse-options (clauses (cons ':short (cons "-a" (cons ':long 5)))))))
+           #t))
+
+  (define-test test-duplicate-field-is-reported-whatever-the-order
+    (CHECK eq? (parse-fails? "-a" '(:long "--x") '(:arity 1) '(:long "--y")) #t)
+    (CHECK eq? (parse-fails? "-a" '(:description "d") '(:type int) '(:description "e")) #t))
+
+  (define-test test-arity-forms-with-a-literal-plus
+    (CHECK equal? (min+max '(0 +)) (cons 0 unlimited))
+    (CHECK equal? (min+max '(10 +)) (cons 10 unlimited))
+    (CHECK equal? (min+max '(0 0)) '(0 . 0)))
+
+  (define-test test-clause-must-be-a-list-of-fields
+    (CHECK eq? (raises-syntax-violation? (lambda () (parse-options (clauses "-a")))) #t)
+    (CHECK eq? (raises-syntax-violation? (lambda () (parse-options (clauses 42)))) #t))
+
+  (define-test test-empty-clause-has-no-name
+    (CHECK eq? (raises-syntax-violation? (lambda () (parse-options (clauses '())))) #t))
+
+  (define-test test-old-syntax-with-a-leading-name-is-rejected
+    ;; ["-n" :long "--count"]: the name must be given with :short
+    (CHECK eq? (raises-syntax-violation?
+                (lambda () (parse-options (clauses '("-n" :long "--count")))))
+           #t))
+
+  (define-test test-a-keyword-given-as-a-value-is-just-a-value
+    ;; :long takes the next word, :arity, as its value, and that is not a valid long name
+    (CHECK eq? (parse-fails? "-a" '(:long :arity) '(:arity 1)) #t))
 
   (define-test test-duplicate-field
     (CHECK eq? (parse-fails? "-a" '(:arity 1) '(:arity 2)) #t)
@@ -149,26 +239,18 @@
 
   (define-test test-duplicates-across-clauses
     (CHECK eq? (raises-syntax-violation?
-                (lambda () (parse-options (list (clause "-a") (clause "-a")))))
+                (lambda () (parse-options (clauses (clause "-a") (clause "-a")))))
            #t)
     (CHECK eq? (raises-syntax-violation?
-                (lambda () (parse-options (list (clause (sym "-a")) (clause "-a")))))
+                (lambda () (parse-options (clauses (clause (sym "-a")) (clause "-a")))))
            #t)
     (CHECK eq? (raises-syntax-violation?
-                (lambda () (parse-options (list (clause "-a" '(:long "--x"))
-                                                (clause "-b" '(:long "--x"))))))
+                (lambda () (parse-options (clauses (clause "-a" '(:long "--x"))
+                                                   (clause "-b" '(:long "--x"))))))
            #t))
 
   (define-test test-violation-points-at-the-clause
     (guard (e [(syntax-violation? e)
-               (CHECK equal? (syntax->datum (syntax-violation-form e)) '("-a" (:arity (3 2))))])
+               (CHECK equal? (syntax->datum (syntax-violation-form e)) '(:short "-a" :arity (3 2)))])
       (parse "-a" '(:arity (3 2)))
-      (assert #f)))
-
-  ;; ========================================
-  ;; syntax-list
-  ;; ========================================
-
-  (define-test test-syntax-list
-    (CHECK eqv? (length (syntax-list #'(a b c))) 3)
-    (CHECK equal? (syntax-list #'()) '())))
+      (assert #f))))
