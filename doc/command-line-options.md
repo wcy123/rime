@@ -286,8 +286,25 @@ $ grep-lite --verbose=1
 Exception in opt-parser: option does not take arguments with irritant "--verbose"
 ```
 
+# Implementation
+
+`define-command-line-options` works in two phases (see `rime/command-line-options.sls`):
+
+1. each clause is parsed and validated into an `option-ast` record
+   (`rime/command-line-options/__ast.sls`), then the records are checked together
+   (duplicate or reserved names);
+2. the definition is generated from the records.
+
+Adding a field to the clause syntax means adding a field to the record, one parse rule in
+`__ast.sls`, and one line in the generator. The runtime that parses the command line
+and prints the usage is `rime/command-line-options/__parser.sls`.
+
 # Tests
 
-`test/rime/command-line-options-test.sls`, run with `make test-chez/rime/command-line-options-test`
-(or `make test-chez` for everything), and the same with `test-guile`. The real `-h` path, which calls `exit`,
+* `test/rime/command-line-options-test.sls`: the macro and the parser end to end,
+  `make test-chez/rime/command-line-options-test`
+* `test/rime/command-line-options/__ast-test.sls`: the clause parsing and validation on its own,
+  `make test-chez/rime/command-line-options/__ast-test`
+
+`make test-chez` runs everything, and the same with `test-guile`. The real `-h` path, which calls `exit`,
 is exercised on Chez and on Guile.

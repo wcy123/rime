@@ -3,6 +3,7 @@
   (export define-command-line-options)
   (import (rnrs (6))
           (for (rnrs (6)) expand)
+          (for (rime command-line-options __ast) expand)
           (rime command-line-options __parser))
 
   ;; (define-command-line-options parser clause ...)
@@ -51,131 +52,37 @@
                            "unknown field, or field without a value (expected :long :arity :type :description)"
                            #'bad)])))
 
-  ;; Validates all collected clauses and emits the definition.
+  ;; Phase 1: parse every clause into an option-ast record and check the options together.
+  ;; Phase 2: generate the definition from the records.
   (define-syntax finish-definition
     (lambda (stx)
-      (define (violation message form)
-        (syntax-violation 'define-command-line-options message form))
+      (define (converter type)
+        (case type
+          [(string) #'convert-string]
+          [(int) #'convert-int]
+          [(float) #'convert-float]
+          [(bool) #'convert-bool]
+          [else type]))
 
-      (define (syntax-list form)
-        (syntax-case form ()
-          [() '()]
-          [(x . rest) (cons #'x (syntax-list #'rest))]))
-
-      (define (field-pairs keys values)
-        (map cons (syntax-list keys) (syntax-list values)))
-
-      (define (name->string form what)
-        (let ([datum (syntax->datum form)])
-          (cond [(string? datum) datum]
-                [(symbol? datum) (symbol->string datum)]
-                [else (violation (string-append what " must be a string or a symbol") form)])))
-
-      (define (well-formed? name)
-        (for-all (lambda (c) (not (or (char=? c #\=) (char=? c #\,) (char-whitespace? c))))
-                 (string->list name)))
-
-      (define (short-name? name)
-        (and (> (string-length name) 1)
-             (char=? (string-ref name 0) #\-)
-             (not (char=? (string-ref name 1) #\-))
-             (well-formed? name)))
-
-      (define (long-name? name)
-        (and (> (string-length name) 2)
-             (string=? (substring name 0 2) "--")
-             (not (char=? (string-ref name 2) #\-))
-             (well-formed? name)))
-
-      (define (non-negative-integer? datum)
-        (and (integer? datum) (exact? datum) (>= datum 0)))
-
-      ;; the value form of field `key`, #f if absent
-      (define (field pairs key)
-        (let ([found (filter (lambda (p) (eq? (syntax->datum (car p)) key)) pairs)])
-          (cond [(null? found) #f]
-                [(null? (cdr found)) (cdr (car found))]
-                [else (violation "duplicate field" (car (cadr found)))])))
-
-      ;; returns (cons min max), max = #f when unbounded
-      (define (parse-arity form)
-        (let ([datum (if form (syntax->datum form) 1)])
-          (cond
-           [(non-negative-integer? datum) (cons datum datum)]
-           [(and (pair? datum) (pair? (cdr datum)) (null? (cddr datum))
-                 (non-negative-integer? (car datum))
-                 (or (eq? (cadr datum) '+) (non-negative-integer? (cadr datum))))
-            (let ([min (car datum)]
-                  [max (if (eq? (cadr datum) '+) #f (cadr datum))])
-              (if (and max (> min max))
-                  (violation "arity min must not exceed max" form)
-                  (cons min max)))]
-           [else (violation "arity must be n, (min max) or (min +)" form)])))
-
-      ;; returns (list short long) as strings, long may be #f
-      (define (names spec)
-        (syntax-case spec ()
-          [(name (key value) ...)
-           (let* ([short (name->string #'name "option name")]
-                  [long-form (field (field-pairs #'(key ...) #'(value ...)) ':long)]
-                  [long (and long-form (name->string long-form ":long name"))])
-             (unless (short-name? short)
-               (violation "option name must look like \"-x\"" #'name))
-             (when (and long (not (long-name? long)))
-               (violation ":long name must look like \"--name\"" long-form))
-             (list short long))]))
-
-      (define (analyze spec)
-        (syntax-case spec ()
-          [(name (key value) ...)
-           (let* ([pairs (field-pairs #'(key ...) #'(value ...))]
-                  [short-and-long (names spec)]
-                  [arity (parse-arity (field pairs ':arity))]
-                  [type (field pairs ':type)]
-                  [description (field pairs ':description)])
-             (when (and type (= 0 (car arity)) (eqv? 0 (cdr arity)))
-               (violation ":type must not be given when arity is 0" type))
-             (when (and description (not (string? (syntax->datum description))))
-               (violation ":description must be a string" description))
-             (let-values ([(type-name converter)
-                           (cond
-                            [(or (not type) (eq? (syntax->datum type) 'string))
-                             (values 'string #'convert-string)]
-                            [(eq? (syntax->datum type) 'int) (values 'int #'convert-int)]
-                            [(eq? (syntax->datum type) 'float) (values 'float #'convert-float)]
-                            [(eq? (syntax->datum type) 'bool) (values 'bool #'convert-bool)]
-                            [else (values #f type)])])
-               (with-syntax ([short (datum->syntax #'here (car short-and-long))]
-                             [long (datum->syntax #'here (cadr short-and-long))]
-                             [min (datum->syntax #'here (car arity))]
-                             [max (if (cdr arity)
-                                      (datum->syntax #'here (cdr arity))
-                                      #'(greatest-fixnum))]
-                             [type-name (datum->syntax #'here type-name)]
-                             [converter converter]
-                             [description (or description (datum->syntax #'here ""))])
-                 #'(make-option-spec short long min max 'type-name converter description))))]))
-
-      (define (check-names specs)
-        (let loop ([specs specs] [seen '("-h" "--help")])
-          (unless (null? specs)
-            (let ([used (filter values (names (car specs)))])
-              (for-each
-               (lambda (name)
-                 (when (member name seen)
-                   (violation (if (member name '("-h" "--help"))
-                                  "-h and --help are reserved for the built-in help"
-                                  "option name is defined twice")
-                              (car specs))))
-               used)
-              (loop (cdr specs) (append used seen))))))
+      (define (option->spec-expression option)
+        (let ([type (option-ast-type option)])
+          (with-syntax ([short (datum->syntax #'here (option-ast-short option))]
+                        [long (datum->syntax #'here (option-ast-long option))]
+                        [min (datum->syntax #'here (option-ast-min option))]
+                        [max (if (option-ast-max option)
+                                 (datum->syntax #'here (option-ast-max option))
+                                 #'(greatest-fixnum))]
+                        [type-name (datum->syntax #'here (and (symbol? type) type))]
+                        [converter (converter type)]
+                        [description (datum->syntax #'here (option-ast-description option))])
+            #'(make-option-spec short long min max 'type-name converter description))))
 
       (syntax-case stx ()
-        [(_ parser spec ...)
-         (let ([specs (syntax-list #'(spec ...))])
-           (check-names specs)
-           (with-syntax ([(make-spec ...) (map analyze specs)])
+        [(_ parser clause ...)
+         (let ([options (map parse-option (syntax-list #'(clause ...)))])
+           (check-options options)
+           (with-syntax ([(spec ...) (map option->spec-expression options)])
              #'(define parser
-                 (let ([specs (list make-spec ...)])
+                 (let ([specs (list spec ...)])
                    (lambda (arguments)
                      (parse-command-line specs arguments))))))]))))
