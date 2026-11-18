@@ -54,7 +54,7 @@
    [guile
     (define (syntax-location syn)
       (let ([syntax-source (eval 'syntax-source (environment '(guile)))])
-        (let ([src (map cdr (syntax-source syn))])
+        (let ([src (map cdr (or (syntax-source syn) '()))])
           (if (fx=? 3 (length src))
               (begin
                 (list (list-ref src 0)

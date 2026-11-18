@@ -26,8 +26,8 @@
          (datum->syntax #'k (syntax-location-as-string #'k))])))
 
   (define-test test-location-without-source-information
-    ;; guile 3.0.1 returns #f from syntax-source here, which used to raise
     (CHECK eq? (string? (location-of-generated-syntax)) #t))
 
   (define-test test-location-with-source-information
+    ;; guile 3.0.1 returns #f from syntax-source for this syntax object, which used to raise
     (CHECK eq? (string? (location-of-source-syntax)) #t)))
