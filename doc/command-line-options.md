@@ -44,6 +44,10 @@ the list of command line arguments (without the program name).
 | `:type <type>`       | how to convert each argument, not allowed with arity `0`   | `string`   |
 | `:description "..."` | text shown by `--help`                                     | empty      |
 
+The keywords `:long :arity :type :description` are exported by the library, so import it whole
+(`(import (rime command-line-options))`); `(only (rime command-line-options) define-command-line-options)`
+would leave them unbound and the clauses would be rejected.
+
 Fields can be written in any order. Mistakes in the definition (unknown field, duplicated
 name, `:type` on a flag, `min > max`, ...) are reported when the program is compiled,
 as syntax violations.
@@ -288,23 +292,29 @@ Exception in opt-parser: option does not take arguments with irritant "--verbose
 
 # Implementation
 
-`define-command-line-options` works in two phases (see `rime/command-line-options.sls`):
+Syntax and semantics are kept apart. A clause is first parsed into an `option-ast` record, which
+says what the option means and knows nothing about how it was written; code is then generated
+from the records only.
 
-1. each clause is parsed and validated into an `option-ast` record
-   (`rime/command-line-options/__ast.sls`), then the records are checked together
-   (duplicate or reserved names);
-2. the definition is generated from the records.
+| file (`rime/command-line-options/`) | job                                                                         |
+|-------------------------------------|-----------------------------------------------------------------------------|
+| `../command-line-options.sls`       | the exported macro; walks the clauses and runs the two phases               |
+| `__parse.sls`                       | phase 1, syntax -> AST: reads the clauses, checks they are well formed      |
+| `__ast.sls`                         | the AST record, and the semantic rules (names, arity, type, duplicates)     |
+| `__codegen.sls`                     | phase 2, AST -> code: generates the definition, never reads user syntax     |
+| `__parser.sls`                      | the runtime: parses the command line, builds the accessor, prints the usage |
 
-Adding a field to the clause syntax means adding a field to the record, one parse rule in
-`__ast.sls`, and one line in the generator. The runtime that parses the command line
-and prints the usage is `rime/command-line-options/__parser.sls`.
+Adding a field to the clause syntax means a field in the record and a rule in `__ast.sls` if it
+has one, a parse rule in `__parse.sls`, and a line in `__codegen.sls`.
 
 # Tests
 
-* `test/rime/command-line-options-test.sls`: the macro and the parser end to end,
-  `make test-chez/rime/command-line-options-test`
-* `test/rime/command-line-options/__ast-test.sls`: the clause parsing and validation on its own,
-  `make test-chez/rime/command-line-options/__ast-test`
+Each module has its own test file, `make test-chez/rime/command-line-options/<name>`:
+
+* `test/rime/command-line-options/__parse-test.sls`: syntax to AST
+* `test/rime/command-line-options/__ast-test.sls`: the semantic rules, on records built by hand
+* `test/rime/command-line-options/__codegen-test.sls`: AST to code, on records built by hand
+* `test/rime/command-line-options-test.sls`: the macro and the parser end to end
 
 `make test-chez` runs everything, and the same with `test-guile`. The real `-h` path, which calls `exit`,
 is exercised on Chez and on Guile.

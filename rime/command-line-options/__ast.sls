@@ -1,123 +1,65 @@
 #!r6rs
-;; Phase 1 of define-command-line-options: the syntax of one option clause is parsed and
-;; validated into an option-ast record. Code generation (phase 2) only reads these records.
-;; This library is imported `for expand`.
+;; The semantic model of a command line option, and the rules that make a set of options valid.
+;; It knows nothing about the surface syntax of define-command-line-options, and it does not
+;; generate code: phase 1 (__parse.sls) builds these records from syntax, phase 2
+;; (__codegen.sls) turns them into code.
 (library (rime command-line-options __ast)
-  (export syntax-list
-          parse-option
-          check-options
+  (export make-option-ast
           option-ast-short
           option-ast-long
           option-ast-min
           option-ast-max
           option-ast-type
-          option-ast-description)
+          option-ast-converter
+          option-ast-description
+          option-ast-source
+          check-options)
   (import (rnrs (6)))
 
-  ;; short, long: strings, long may be #f
-  ;; min, max: non-negative integers, max is #f when unbounded
-  ;; type: 'string 'int 'float 'bool, or the syntax of a procedure expression
-  ;; description: a string
-  ;; form: the clause syntax, for error messages
+  ;; short       string, "-n"
+  ;; long        string "--count", or #f
+  ;; min         non-negative integer, the least number of arguments
+  ;; max         non-negative integer, the most number of arguments, #f when unbounded
+  ;; type        #f when none was given, 'string 'int 'float 'bool, or 'custom
+  ;; converter   for type 'custom, the procedure expression; opaque here, never inspected; else #f
+  ;; description string
+  ;; source      opaque, where the option came from; only handed back to `report` below
   (define-record-type option-ast
-    (fields short long min max type description form))
+    (fields short long min max type converter description source))
 
   (define reserved-names '("-h" "--help"))
-  (define known-fields '(:long :arity :type :description))
-
-  (define (violation message form)
-    (syntax-violation 'define-command-line-options message form))
-
-  (define (syntax-list form)
-    (syntax-case form ()
-      [() '()]
-      [(x . rest) (cons #'x (syntax-list #'rest))]))
-
-  (define (non-negative-integer? datum)
-    (and (integer? datum) (exact? datum) (>= datum 0)))
 
   (define (well-formed? name)
     (for-all (lambda (c) (not (or (char=? c #\=) (char=? c #\,) (char-whitespace? c))))
              (string->list name)))
 
-  (define (name->string form what)
-    (let ([datum (syntax->datum form)])
-      (cond [(string? datum) datum]
-            [(symbol? datum) (symbol->string datum)]
-            [else (violation (string-append what " must be a string or a symbol") form)])))
+  (define (short-name? name)
+    (and (> (string-length name) 1)
+         (char=? (string-ref name 0) #\-)
+         (not (char=? (string-ref name 1) #\-))
+         (well-formed? name)))
 
-  ;; the value syntax of field `key`, #f if the clause does not have it
-  (define (field pairs key)
-    (let ([found (filter (lambda (p) (eq? (syntax->datum (car p)) key)) pairs)])
-      (cond [(null? found) #f]
-            [(null? (cdr found)) (cdr (car found))]
-            [else (violation "duplicate field" (car (cadr found)))])))
+  (define (long-name? name)
+    (and (> (string-length name) 2)
+         (string=? (substring name 0 2) "--")
+         (not (char=? (string-ref name 2) #\-))
+         (well-formed? name)))
 
-  (define (parse-short form)
-    (let ([name (name->string form "option name")])
-      (unless (and (> (string-length name) 1)
-                   (char=? (string-ref name 0) #\-)
-                   (not (char=? (string-ref name 1) #\-))
-                   (well-formed? name))
-        (violation "option name must look like \"-x\"" form))
-      name))
+  (define (flag? option)
+    (and (eqv? 0 (option-ast-min option)) (eqv? 0 (option-ast-max option))))
 
-  (define (parse-long form)
-    (and form
-         (let ([name (name->string form ":long name")])
-           (unless (and (> (string-length name) 2)
-                        (string=? (substring name 0 2) "--")
-                        (not (char=? (string-ref name 2) #\-))
-                        (well-formed? name))
-             (violation ":long name must look like \"--name\"" form))
-           name)))
-
-  ;; returns (cons min max), max = #f when unbounded
-  (define (parse-arity form)
-    (let ([datum (if form (syntax->datum form) 1)])
-      (cond
-       [(non-negative-integer? datum) (cons datum datum)]
-       [(and (pair? datum) (pair? (cdr datum)) (null? (cddr datum))
-             (non-negative-integer? (car datum))
-             (or (eq? (cadr datum) '+) (non-negative-integer? (cadr datum))))
-        (let ([min (car datum)]
-              [max (if (eq? (cadr datum) '+) #f (cadr datum))])
-          (when (and max (> min max))
-            (violation "arity min must not exceed max" form))
-          (cons min max))]
-       [else (violation "arity must be n, (min max) or (min +)" form)])))
-
-  (define (parse-type form)
-    (cond [(not form) 'string]
-          [(memq (syntax->datum form) '(string int float bool)) (syntax->datum form)]
-          [else form]))
-
-  (define (parse-description form)
-    (cond [(not form) ""]
-          [(string? (syntax->datum form)) (syntax->datum form)]
-          [else (violation ":description must be a string" form)]))
-
-  ;; clause = (name (key value) ...)
-  (define (parse-option clause)
-    (syntax-case clause ()
-      [(name (key value) ...)
-       (let* ([pairs (map cons (syntax-list #'(key ...)) (syntax-list #'(value ...)))]
-              [unused (for-each (lambda (p)
-                                  (unless (memq (syntax->datum (car p)) known-fields)
-                                    (violation "unknown field" (car p))))
-                                pairs)]
-              [short (parse-short #'name)]
-              [long (parse-long (field pairs ':long))]
-              [arity (parse-arity (field pairs ':arity))]
-              [type-form (field pairs ':type)]
-              [description (parse-description (field pairs ':description))])
-         (when (and type-form (eqv? 0 (car arity)) (eqv? 0 (cdr arity)))
-           (violation ":type must not be given when arity is 0" type-form))
-         (make-option-ast short long (car arity) (cdr arity)
-                          (parse-type type-form) description clause))]))
+  (define (check-option option report)
+    (unless (short-name? (option-ast-short option))
+      (report "option name must look like \"-x\"" option))
+    (when (and (option-ast-long option) (not (long-name? (option-ast-long option))))
+      (report ":long name must look like \"--name\"" option))
+    (when (and (option-ast-max option) (> (option-ast-min option) (option-ast-max option)))
+      (report "arity min must not exceed max" option))
+    (when (and (flag? option) (option-ast-type option))
+      (report ":type must not be given when arity is 0" option)))
 
   ;; names must be unique across all options and must not use the built-in help names
-  (define (check-options options)
+  (define (check-names options report)
     (let loop ([options options] [seen reserved-names])
       (unless (null? options)
         (let* ([option (car options)]
@@ -127,9 +69,14 @@
           (for-each
            (lambda (name)
              (when (member name seen)
-               (violation (if (member name reserved-names)
-                              "-h and --help are reserved for the built-in help"
-                              "option name is defined twice")
-                          (option-ast-form option))))
+               (report (if (member name reserved-names)
+                           "-h and --help are reserved for the built-in help"
+                           "option name is defined twice")
+                       option)))
            names)
-          (loop (cdr options) (append names seen)))))))
+          (loop (cdr options) (append names seen))))))
+
+  ;; (report message option) is called for each broken rule and is expected not to return
+  (define (check-options options report)
+    (for-each (lambda (option) (check-option option report)) options)
+    (check-names options report)))

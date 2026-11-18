@@ -691,6 +691,24 @@
                    1))
            #t))
 
+  ;; ========================================
+  ;; keywords
+  ;; ========================================
+
+  (define-test test-keywords-are-exported
+    (CHECK eq?
+           (guard (e [else #f])
+             (environment '(only (rime command-line-options) :long :arity :type :description))
+             #t)
+           #t))
+
+  (define-test test-keywords-are-auxiliary-syntax
+    ;; using a keyword as an expression is a syntax violation, not an unbound variable
+    (for-each
+     (lambda (keyword)
+       (CHECK eq? (syntax-error? keyword) #t))
+     '(:long :arity :type :description)))
+
   (define-test test-valid-definition-is-not-syntax-error
     (CHECK eq? (syntax-error?
                 '(let ()

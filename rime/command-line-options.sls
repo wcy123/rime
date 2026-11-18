@@ -1,10 +1,15 @@
 #!r6rs
 (library (rime command-line-options)
-  (export define-command-line-options)
+  (export define-command-line-options
+          :long :arity :type :description)
   (import (rnrs (6))
           (for (rnrs (6)) expand)
-          (for (rime command-line-options __ast) expand)
-          (rime command-line-options __parser))
+          (for (rime command-line-options __parse) expand)
+          (for (rime command-line-options __codegen) expand)
+          (rime syntax __define-auxiliary-syntax))
+
+  ;; the field keywords of a clause, exported so that they are bound and match by binding
+  (define-auxiliary-syntax :long :arity :type :description)
 
   ;; (define-command-line-options parser clause ...)
   ;;   clause = [name field ...]   name = "-x" or -x
@@ -20,7 +25,18 @@
                              "expected (define-command-line-options name clause ...)"
                              stx)])))
 
-  ;; Walks the clauses one by one, accumulating (name (key value) ...) per clause.
+  ;; (collect-clauses parser (spec ...) clause ...)
+  ;;   spec   = (name (key value) ...)  a clause that is already processed
+  ;;   clause = [name field ...]        a clause as the user wrote it
+  ;; Loops over the clauses. Takes the first unprocessed clause and hands it to collect-fields, which
+  ;; calls back here with the finished spec added. With no clause left, expands to
+  ;; (finish-definition parser spec ...).
+  ;;
+  ;;   (collect-clauses p () ["-v" :arity 0] ["-n" :type int])
+  ;;   => (collect-fields p () (["-n" :type int]) "-v" () :arity 0)
+  ;;   => (collect-clauses p (("-v" (:arity 0))) ["-n" :type int])
+  ;;   => ...
+  ;;   => (finish-definition p ("-v" (:arity 0)) ("-n" (:type int)))
   (define-syntax collect-clauses
     (lambda (stx)
       (syntax-case stx ()
@@ -33,7 +49,18 @@
                            "option clause must look like [name field ...]"
                            #'bad)])))
 
-  ;; Walks the fields of one clause, accumulating (key value) pairs.
+  ;; (collect-fields parser (spec ...) (clause ...) name (pair ...) field ...)
+  ;;   pair  = (key value)       a field that is already processed
+  ;;   field = :key value        a field as the user wrote it
+  ;;   (clause ...) are the clauses still waiting in collect-clauses.
+  ;; Loops over the fields of one clause, moving each `:key value` into the pairs as `(:key value)`.
+  ;; Anything but one of the four keys followed by a value is a syntax error. With no field left,
+  ;; hands the finished spec (name pair ...) back to collect-clauses.
+  ;;
+  ;;   (collect-fields p () () "-n" () :long "--count" :type int)
+  ;;   => (collect-fields p () () "-n" ((:long "--count")) :type int)
+  ;;   => (collect-fields p () () "-n" ((:long "--count") (:type int)))
+  ;;   => (collect-clauses p (("-n" (:long "--count") (:type int))))
   (define-syntax collect-fields
     (lambda (stx)
       (syntax-case stx (:long :arity :type :description)
@@ -52,37 +79,11 @@
                            "unknown field, or field without a value (expected :long :arity :type :description)"
                            #'bad)])))
 
-  ;; Phase 1: parse every clause into an option-ast record and check the options together.
-  ;; Phase 2: generate the definition from the records.
+  ;; (finish-definition parser spec ...)  spec = (name (key value) ...)
+  ;; Phase 1 (__parse.sls) turns the specs into option-ast records, which are checked;
+  ;; phase 2 (__codegen.sls) generates the definition of `parser` from the records.
   (define-syntax finish-definition
     (lambda (stx)
-      (define (converter type)
-        (case type
-          [(string) #'convert-string]
-          [(int) #'convert-int]
-          [(float) #'convert-float]
-          [(bool) #'convert-bool]
-          [else type]))
-
-      (define (option->spec-expression option)
-        (let ([type (option-ast-type option)])
-          (with-syntax ([short (datum->syntax #'here (option-ast-short option))]
-                        [long (datum->syntax #'here (option-ast-long option))]
-                        [min (datum->syntax #'here (option-ast-min option))]
-                        [max (if (option-ast-max option)
-                                 (datum->syntax #'here (option-ast-max option))
-                                 #'(greatest-fixnum))]
-                        [type-name (datum->syntax #'here (and (symbol? type) type))]
-                        [converter (converter type)]
-                        [description (datum->syntax #'here (option-ast-description option))])
-            #'(make-option-spec short long min max 'type-name converter description))))
-
       (syntax-case stx ()
-        [(_ parser clause ...)
-         (let ([options (map parse-option (syntax-list #'(clause ...)))])
-           (check-options options)
-           (with-syntax ([(spec ...) (map option->spec-expression options)])
-             #'(define parser
-                 (let ([specs (list spec ...)])
-                   (lambda (arguments)
-                     (parse-command-line specs arguments))))))]))))
+        [(_ parser spec ...)
+         (generate-definition #'parser (parse-options (syntax-list #'(spec ...))))]))))
