@@ -21,7 +21,21 @@
           option-ast-converter-set-if-not-given-yet!
           option-ast-description-set-if-not-given-yet!
           option-ast-required-set-if-not-given-yet!
+          option-ast-metavar
+          option-ast-metavar-set-if-not-given-yet!
+          option-ast-with-metavar
           option-ast?
+          make-program-ast
+          make-unbound-program-ast
+          program-ast?
+          program-ast-description
+          program-ast-epilog
+          program-ast-version
+          program-ast-source
+          program-ast-description-set-if-not-given-yet!
+          program-ast-epilog-set-if-not-given-yet!
+          program-ast-version-set-if-not-given-yet!
+          program-ast-fill-defaults!
           option-lookup-names
           make-positional-ast
           make-unbound-positional-ast
@@ -43,7 +57,8 @@
           unbound?
           option-ast-fill-defaults!
           check-options
-          check-positionals)
+          check-positionals
+          check-programs)
   (import (rnrs (6))
           (for (rnrs (6)) expand))
 
@@ -88,6 +103,9 @@
   ;; description string
   ;; source      opaque, where the option came from; only handed back to `report` below, #f at runtime
   ;; required    boolean, #t when it is an error that the option is absent; never #t for a flag
+  ;; metavar     string "file", or #f; what the usage shows for an argument, <file>, instead of the
+  ;;               type; never given to a flag. It is not an argument of make-option-ast: the record
+  ;;               starts with #f, and option-ast-with-metavar gives the generated code a way to set it
   ;;
   ;; The record is the same at compile time and at runtime: the generated code builds it again
   ;; (__codegen.sls) and the runtime works with it (__runtime.sls).
@@ -125,9 +143,14 @@
             (mutable converter)
             (mutable description)
             source
-            (mutable required)))
+            (mutable required)
+            (mutable metavar))
+    (protocol
+     (lambda (new)
+       (lambda (short long min max converter description source required)
+         (new short long min max converter description source required #f)))))
 
-  (define-field-setters option-ast short long min max converter description required)
+  (define-field-setters option-ast short long min max converter description required metavar)
 
   ;; The :positional clause: the words of the command line that are not options.
   ;; name         string, what the program reads them by, and what the usage shows: <name>
@@ -158,9 +181,16 @@
 
   ;; an option that only has its source, everything else is still to be read
   (define (make-unbound-option-ast source)
-    (make-option-ast unbound unbound unbound unbound unbound unbound source unbound))
+    (let ([option (make-option-ast unbound unbound unbound unbound unbound unbound source unbound)])
+      (option-ast-metavar-set! option unbound)
+      option))
 
-  ;; the defaults: no names, exactly one argument, no converter, no description, not required;
+  ;; sets the metavar and returns the option, for the generated code to build an option with one
+  (define (option-ast-with-metavar option metavar)
+    (option-ast-metavar-set! option metavar)
+    option)
+
+  ;; the defaults: no names, exactly one argument, no converter, no description, not required, no metavar;
   ;; only the fields that are still unbound are set
   (define (option-ast-fill-defaults! option)
     (option-ast-short-set-if-not-given-yet! option #f ignore)
@@ -169,7 +199,8 @@
     (option-ast-max-set-if-not-given-yet! option 1 ignore)
     (option-ast-converter-set-if-not-given-yet! option #f ignore)
     (option-ast-description-set-if-not-given-yet! option "" ignore)
-    (option-ast-required-set-if-not-given-yet! option #f ignore))
+    (option-ast-required-set-if-not-given-yet! option #f ignore)
+    (option-ast-metavar-set-if-not-given-yet! option #f ignore))
 
   (define (ignore) #f)
 
@@ -197,7 +228,12 @@
     (when (and (flag? option) (option-ast-converter option))
       (problem ":type and :choices must not be given when arity is 0"))
     (when (and (flag? option) (option-ast-required option))
-      (problem "a flag (arity 0) cannot be :required")))
+      (problem "a flag (arity 0) cannot be :required"))
+    (when (option-ast-metavar option)
+      (when (flag? option)
+        (problem "a flag (arity 0) cannot have a :metavar"))
+      (when (or (string=? (option-ast-metavar option) "") (not (well-formed? (option-ast-metavar option))))
+        (problem ":metavar must not be empty or contain =, , or whitespace"))))
 
   ;; The names the program uses to read an option are the names without their dashes. They must be
   ;; unique across all options, and must not be the names of the built-in help.
@@ -235,6 +271,68 @@
       (if (and (< i count) (< i (string-length name)) (char=? (string-ref name i) #\-))
           (loop (+ i 1))
           (substring name i (string-length name)))))
+
+  ;; The :program clause: what the program says about itself.
+  ;; description  string shown under the first line of the usage, or #f
+  ;; epilog       string shown after the options, or #f
+  ;; version      string, or #f; when it is given the program has --version and -V
+  ;; source       as for an option
+  ;; While the clause is being read the fields it has not given yet are `unbound`, as for an option.
+  (define-record-type program-ast
+    (fields (mutable description)
+            (mutable epilog)
+            (mutable version)
+            source))
+
+  (define (make-unbound-program-ast source)
+    (make-program-ast unbound unbound unbound source))
+
+  (define (program-ast-description-set-if-not-given-yet! program value on-duplicate)
+    (if (unbound? (program-ast-description program))
+        (program-ast-description-set! program value)
+        (on-duplicate)))
+
+  (define (program-ast-epilog-set-if-not-given-yet! program value on-duplicate)
+    (if (unbound? (program-ast-epilog program))
+        (program-ast-epilog-set! program value)
+        (on-duplicate)))
+
+  (define (program-ast-version-set-if-not-given-yet! program value on-duplicate)
+    (if (unbound? (program-ast-version program))
+        (program-ast-version-set! program value)
+        (on-duplicate)))
+
+  ;; the defaults: nothing to say
+  (define (program-ast-fill-defaults! program)
+    (program-ast-description-set-if-not-given-yet! program #f ignore)
+    (program-ast-epilog-set-if-not-given-yet! program #f ignore)
+    (program-ast-version-set-if-not-given-yet! program #f ignore))
+
+  (define version-names '("V" "version"))
+
+  (define version-reserved-message "-V and --version are reserved for the built-in version")
+
+  ;; the rules for the :program clauses (there may be none, and there may be one): the version is
+  ;; not empty, and when there is a version the names of --version and -V are not taken
+  (define (check-programs programs options positionals report)
+    (for-each
+     (lambda (program)
+       (when (and (string? (program-ast-version program)) (string=? (program-ast-version program) ""))
+         (report ":version must not be empty" (program-ast-source program))))
+     programs)
+    (when (and (pair? programs) (pair? (cdr programs)))
+      (report "only one :program clause is allowed" (program-ast-source (cadr programs))))
+    (when (and (pair? programs) (program-ast-version (car programs)))
+      (for-each
+       (lambda (option)
+         (when (exists (lambda (name) (member name version-names)) (option-lookup-names option))
+           (report version-reserved-message (option-ast-source option))))
+       options)
+      (for-each
+       (lambda (positional)
+         (when (member (positional-ast-name positional) version-names)
+           (report version-reserved-message (positional-ast-source positional))))
+       positionals)))
 
   ;; the rules for the :positional clauses, in the order they were written, and for how their names
   ;; relate to the options: the names are unique, and at most one positional takes a variable number

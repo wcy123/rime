@@ -9,19 +9,28 @@
           (rime command-line-options __runtime))
 
   ;; parser: the identifier to define; options: list of option-ast;
-  ;; positionals: list of positional-ast, in the order of the clauses
-  (define (generate-definition parser options positionals)
+  ;; positionals: list of positional-ast, in the order of the clauses;
+  ;; program: the program-ast, or #f; it is only passed to the runtime when there is one
+  (define (generate-definition parser options positionals program)
     (with-syntax ([parser parser]
                   [(spec ...) (map option->spec-expression options)]
-                  [(positional ...) (map positional->expression positionals)])
+                  [(positional ...) (map positional->expression positionals)]
+                  [(program ...) (if program (list (program->expression program)) '())])
       #'(define parser
           (let ([specs (list spec ...)]
                 [positionals (list positional ...)])
             (case-lambda
               [(arguments)
-               (parse-command-line specs arguments default-on-help positionals)]
+               (parse-command-line specs arguments default-on-help positionals program ...)]
               [(arguments on-help)
-               (parse-command-line specs arguments on-help positionals)])))))
+               (parse-command-line specs arguments on-help positionals program ...)])))))
+
+  ;; the same for the program-ast
+  (define (program->expression program)
+    (with-syntax ([description (datum->syntax #'here (program-ast-description program))]
+                  [epilog (datum->syntax #'here (program-ast-epilog program))]
+                  [version (datum->syntax #'here (program-ast-version program))])
+      #'(make-program-ast description epilog version #f)))
 
   ;; the same for the positional-ast
   (define (positional->expression positional)
@@ -43,4 +52,10 @@
                   [converter (or (option-ast-converter option) #'#f)]
                   [description (datum->syntax #'here (option-ast-description option))]
                   [required (datum->syntax #'here (option-ast-required option))])
-      #'(make-option-ast short long min max converter description #f required))))
+      (let ([spec #'(make-option-ast short long min max converter description #f required)])
+        ;; the metavar is not an argument of make-option-ast, it is only set when there is one
+        (if (option-ast-metavar option)
+            (with-syntax ([spec spec]
+                          [metavar (datum->syntax #'here (option-ast-metavar option))])
+              #'(option-ast-with-metavar spec metavar))
+            spec)))))

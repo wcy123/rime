@@ -3,12 +3,16 @@
 ;;   scheme --libdirs . --program example/command-line-options.scm -v --count 3 -e a b -- file.txt
 ;;   guile --r6rs -L . example/command-line-options.scm -v --count 3 -e a b -- file.txt
 ;;   ... example/command-line-options.scm -h
+;;   ... example/command-line-options.scm --version
 (import (rnrs (6)) (rime command-line-options))
 
 (define-command-line-options parse
+  [:program :description "Does some work on the files it is given, as many times as asked."
+            :epilog "Example: example/command-line-options.scm -n 3 -f json a.txt b.txt"
+            :version "1.0.0"]
   [:short "-v" :long "--verbose" :arity 0
    :description "print more details about what is going on while the program runs"]
-  [:short "-n" :long "--count" :type int
+  [:short "-n" :long "--count" :type int :metavar "times"
    :description "how many times to repeat the work; this is a whole number, and the default is 1.\nUse 0 to only check the arguments without doing any work."]
   [:short "-e" :long "--exclude" :arity (1 +)
    :description "patterns to exclude, one or more, for example:\n  -e '*.tmp' '*.bak' '*~'\nAn argument that starts with a dash has to be escaped with a backslash."]

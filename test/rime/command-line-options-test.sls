@@ -1681,7 +1681,8 @@
     (when run-capturing-exit
       (let ([result (run-capturing-exit (lambda () (versioned '("--help"))))])
         (CHECK eqv? (car result) 0)
-        (CHECK eq? (contains? (cdr result) "-V, --version  show the version and exit") #t))))
+        (CHECK eq? (contains? (cdr result) "  -V, --version") #t)
+        (CHECK eq? (contains? (cdr result) "show the version and exit\n") #t))))
 
   (define-test test-version-through-the-hook
     (let ([shown #f])
