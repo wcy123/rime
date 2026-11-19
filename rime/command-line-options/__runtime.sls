@@ -208,8 +208,10 @@
              [else (fail "unknown option" key (unknown-name-hint specs positionals name))]))
           (fail "invalid option key" key))))
 
-  ;; the second irritant of "unknown option" from the accessor, what to do about it: a name that starts
-  ;; with a dash was written like on the command line, any other is shown with the names that exist
+  ;; When the program asks for a name that does not exist, (option "verbos"), the error carries the
+  ;; name and then a hint about what to do. A name that starts with a dash was written like on the
+  ;; command line, so the hint says that the names have no dashes. Any other name gets the list of
+  ;; the names that do exist.
   (define (unknown-name-hint specs positionals name)
     (if (and (> (string-length name) 0) (char=? (string-ref name 0) #\-))
         "names are read without the dashes"
@@ -465,5 +467,6 @@
   ;; errors
   ;; ========================================
 
-  (define (fail message . irritants)
-    (apply error 'opt-parser message irritants)))
+  ;; details are the values the message is about, the option name, the text that did not fit, ...
+  (define (fail message . details)
+    (apply error 'opt-parser message details)))

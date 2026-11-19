@@ -411,10 +411,12 @@ The program name is the first element of `(command-line)`.
 
 # Errors
 
-Problems with the command line raise an `&error` condition from `(error 'opt-parser message irritant ...)`.
-Catch it with `guard`; the library never exits by itself except for `-h`.
+Problems with the command line raise an `&error` condition from `(error 'opt-parser message detail ...)`.
+The message says what went wrong, and the details are the values it is about: the option name, the text
+that did not fit, and so on. (R6RS calls the details "irritants": `condition-irritants` gives them as a list.)
+Catch the error with `guard`; the library never exits by itself except for `-h`.
 
-| message                            | when                                                  | irritants              |
+| message                            | when                                                  | details                |
 |------------------------------------|-------------------------------------------------------|------------------------|
 | `too few arguments for option`     | fewer than `min` arguments, also `--name=x` for an option that needs two or more | the option name        |
 | `option does not take arguments`   | `--flag=1` on an arity 0 option                       | the option name        |
@@ -432,15 +434,14 @@ Catch it with `guard`; the library never exits by itself except for `-h`.
 
 The accessor raises `unknown option` for names that were not defined (also a name with its dashes);
 the parser never does, a word that is not a defined option is an ordinary word.
-The accessor raises `invalid option key` for anything that is not a string or a symbol. The first irritant of
-`unknown option` is the name as it was given, the second says what to do about it: for a name that
-starts with a dash, the text `names are read without the dashes`, and for any other name, the list of
-the names that exist (the options in the order they were defined, short name first, then the
-positionals).
+The accessor raises `invalid option key` for anything that is not a string or a symbol. `unknown option`
+carries the name as it was given, and then a hint about what to do: for a name that starts with a dash,
+the text `names are read without the dashes`, and for any other name, the list of the names that exist
+(the options in the order they were defined, short name first, then the positionals).
 
 ```
-(option "verbos")     ; unknown option, irritants: "verbos" ("v" "verbose" "o" "output" "name" "file")
-(option "--verbose")  ; unknown option, irritants: "--verbose" "names are read without the dashes"
+(option "verbos")     ; unknown option, details: "verbos" ("v" "verbose" "o" "output" "name" "file")
+(option "--verbose")  ; unknown option, details: "--verbose" "names are read without the dashes"
 ```
 
 # A complete example
