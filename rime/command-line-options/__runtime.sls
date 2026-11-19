@@ -589,18 +589,18 @@
                      " (for " (car details) ")")]
      [(and (is? "too few arguments for option") (= 1 (length details)) (all-strings? details))
       (string-append "too few arguments for " (car details))]
+     [(and (is? "too many arguments for option") (= 1 (length details)) (all-strings? details))
+      (string-append "too many arguments for " (car details))]
      [(and (is? "option does not take arguments") (= 1 (length details)) (all-strings? details))
       (string-append (car details) " does not take arguments")]
      [(and (is? "missing required option") (= 1 (length details)) (all-strings? details))
       (string-append "missing required option " (car details))]
      [(and (is? "too few positional arguments") (= 1 (length details)) (all-strings? details))
-      (string-append "too few positional arguments, <" (car details) "> needs more")]
+      (string-append "missing positional argument <" (car details) ">")]
      [(and (is? "too many positional arguments") (pair? details) (all-strings? details))
       (string-append "too many positional arguments: " (words details))]
      [(and (is? "unexpected positional argument") (pair? details) (all-strings? details))
       (string-append "unexpected positional argument: " (words details))]
-     [(and (is? "unknown option") (= 1 (length details)) (all-strings? details))
-      (string-append "unknown option " (car details))]
      [else #f]))
 
   (define (write->string datum)

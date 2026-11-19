@@ -628,9 +628,10 @@ what a program reads with `condition-message` and `condition-irritants`; the sen
 | `invalid argument value` | `invalid argument "abc" for -n` |
 | `argument must be one of the choices` | `"xml" is not one of json, text (for --format)` |
 | `too few arguments for option` | `too few arguments for -n` |
+| `too many arguments for option` | `too many arguments for --pair` |
 | `option does not take arguments` | `--verbose does not take arguments` |
 | `missing required option` | `missing required option --input` |
-| `too few positional arguments` | `too few positional arguments, <dest> needs more` |
+| `too few positional arguments` | `missing positional argument <dest>` |
 | `too many positional arguments` | `too many positional arguments: b c` |
 | `unexpected positional argument` | `unexpected positional argument: a` |
 
@@ -758,7 +759,7 @@ $ prog -i a.txt
 "a.txt"
 
 $ prog
-prog: missing required option: "--input"
+prog: missing required option --input
 
 Usage: prog [options]
 
@@ -883,7 +884,7 @@ $ prog remove --force x y
 (remove #t ("x" "y"))
 
 $ prog remove
-prog: too few positional arguments: "file"
+prog: missing positional argument <file>
 
 Usage: prog [options] [--] <file>...
 
@@ -937,7 +938,7 @@ $ prog --verbose=2
 verbosity 2
 
 $ prog -v
-prog: too few arguments for option: "-v"
+prog: too few arguments for -v
 
 Usage: prog [options]
 

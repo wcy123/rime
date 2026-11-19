@@ -772,6 +772,9 @@
      (list "too few arguments for option" '("--pair")
            "too few arguments for --pair"
            (lambda () (parse '("--pair=3"))))
+     (list "too many arguments for option" '("--pair")
+           "too many arguments for --pair"
+           (lambda () (parse '("--pair" "1" "2" "--pair" "3" "4"))))
      (list "option does not take arguments" '("--verbose")
            "--verbose does not take arguments"
            (lambda () (parse '("--verbose=1"))))
@@ -782,7 +785,7 @@
            "missing required option -k"
            (lambda () (parse-required-short '())))
      (list "too few positional arguments" '("file")
-           "too few positional arguments, <file> needs more"
+           "missing positional argument <file>"
            (lambda () (parse-one '())))
      (list "too many positional arguments" '("b" "c")
            "too many positional arguments: b c"
@@ -821,7 +824,7 @@
      (map (lambda (row) (list (car row) (cadr row) (caddr row) (cadddr row))) report-rows)))
 
   (define-test test-describe-problem-gives-the-sentence-of-a-message
-    (CHECK equal? (describe-problem "unknown option" '("--verbos")) "unknown option --verbos")
+    (CHECK equal? (describe-problem "too many arguments for option" '("--pair")) "too many arguments for --pair")
     (CHECK equal? (describe-problem "invalid argument value" '("--name" "")) "invalid argument \"\" for --name")
     (CHECK equal? (describe-problem "invalid argument value" '("--name" "a \"b\""))
            "invalid argument \"a \\\"b\\\"\" for --name"))
@@ -1763,7 +1766,7 @@
                               ((parse '()) "help"))))
       (let ([result (run-capturing-exit-and-error (lambda () (parse-or-exit parse-one '())))])
         (CHECK eqv? (car result) 2)
-        (CHECK eq? (contains? (caddr result) "too few positional arguments, <file> needs more") #t)
+        (CHECK eq? (contains? (caddr result) "missing positional argument <file>") #t)
         (CHECK eq? (contains? (caddr result) "Usage: ") #t))))
 
   (define-test test-parse-or-exit-lets-the-other-errors-through
