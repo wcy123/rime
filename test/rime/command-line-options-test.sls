@@ -1627,6 +1627,79 @@
                    p))
            #t))
 
+  ;; ========================================
+  ;; --version
+  ;; ========================================
+
+  (define-command-line-options versioned
+    [:program :version "1.2.3"]
+    [:short "-n" :long "--count" :type int :required :description "count"]
+    [:positional "file"])
+
+  (define-command-line-options versioned-words
+    [:program :version "2.0"]
+    [:positional "words" :arity (0 +)])
+
+  (define-test test-version-prints-the-version-and-exits
+    (when run-capturing-exit
+      (for-each
+       (lambda (word)
+         (let ([result (run-capturing-exit (lambda () (versioned (list word))))])
+           (CHECK eqv? (car result) 0)
+           (CHECK equal? (cdr result) (string-append (program-name) " 1.2.3\n"))))
+       '("--version" "-V"))))
+
+  (define-test test-version-needs-neither-the-required-option-nor-the-positional
+    ;; versioned has a required -n and a positional, and none of them is given
+    (when run-capturing-exit
+      (let ([result (run-capturing-exit (lambda () (versioned '("--version"))))])
+        (CHECK eqv? (car result) 0))))
+
+  (define-test test-version-after-other-words-and-options
+    (when run-capturing-exit
+      (let ([result (run-capturing-exit (lambda () (versioned '("-n" "3" "f" "--version"))))])
+        (CHECK eqv? (car result) 0)
+        (CHECK equal? (cdr result) (string-append (program-name) " 1.2.3\n")))))
+
+  (define-test test-version-stops-parsing
+    (when run-capturing-exit
+      (let ([result (run-capturing-exit (lambda () (versioned '("--version" "--nope"))))])
+        (CHECK eqv? (car result) 0))))
+
+  (define-test test-version-after-double-dash-is-a-word
+    (when run-capturing-exit
+      (let ([result (run-capturing-exit (lambda () (versioned-words '("--" "--version"))))])
+        (CHECK eq? (car result) 'exit-not-called)
+        (CHECK equal? (cdr result) "")))
+    (CHECK equal? ((versioned-words '("--" "--version" "-V")) "words") '("--version" "-V")))
+
+  (define-test test-version-is-not-the-short-name-v
+    ;; -v is the name of a verbose flag in many programs, it is never the version
+    (CHECK equal? (error-message (lambda () (versioned-words '("-v")))) "unknown option"))
+
+  (define-test test-version-and-help-are-both-built-in
+    (when run-capturing-exit
+      (let ([result (run-capturing-exit (lambda () (versioned '("--help"))))])
+        (CHECK eqv? (car result) 0)
+        (CHECK eq? (contains? (cdr result) "-V, --version  show the version and exit") #t))))
+
+  (define-test test-version-through-the-hook
+    (let ([shown #f])
+      (parse-command-line '() '("--version") (lambda (text) (set! shown text)) '()
+                          (make-program-ast #f #f "1.2.3" #f))
+      (CHECK equal? shown (string-append (program-name) " 1.2.3\n"))))
+
+  (define-test test-without-a-version-there-is-no-version-option
+    (CHECK equal? (error-message (lambda () (parse-small '("--version")))) "unknown option")
+    (CHECK equal? (error-message (lambda () (parse-small '("-V")))) "unknown option")
+    (CHECK equal? (error-message (lambda () (parse-about '("--version")))) "unknown option")
+    (CHECK eq? (contains? ((parse-small '()) 'help) "--version") #f))
+
+  (define-test test-the-names-of-the-version-are-not-lookup-names
+    (let ([option (versioned-words '())])
+      (CHECK equal? (error-message (lambda () (option "version"))) "unknown option")
+      (CHECK equal? (error-message (lambda () (option "V"))) "unknown option")))
+
   (define-test test-program-name-is-a-string
     (CHECK eq? (string? (program-name)) #t))
 
@@ -2070,6 +2143,167 @@
            (list 1 unlimited "<f>...")
            (list 0 unlimited "[<f>...]")
            (list 2 2 "<f> <f>"))))
+
+  ;; ========================================
+  ;; usage: :metavar, the text of the program
+  ;; ========================================
+
+  (define-command-line-options parse-metavar
+    [:short "-i" :long "--input" :metavar "file" :description "file to read"]
+    [:long "--pair" :arity 2 :metavar "n" :type int :description "two numbers"]
+    [:short "-e" :arity (1 +) :metavar "pattern" :description "patterns"]
+    [:long "--tag" :arity (0 +) :metavar "t"]
+    [:short "-w" :arity (0 2) :metavar "n" :type int]
+    [:short "-q" :arity 0 :description "quiet"])
+
+  (define-test test-metavar-replaces-the-type-in-the-usage
+    (CHECK equal? ((parse-metavar '()) 'help)
+           (string-append "Usage: " (program-name) " [options]\n"
+                          "\n"
+                          "Options:\n"
+                          "  -i, --input <file>  file to read\n"
+                          "      --pair <n> <n>  two numbers\n"
+                          "  -e <pattern>...     patterns\n"
+                          "      --tag [<t>...]\n"
+                          "  -w [<n>] [<n>]\n"
+                          "  -q" (spaces 18) "quiet\n"
+                          "  -h, --help" (spaces 10) "show this help message and exit\n")))
+
+  (define-test test-metavar-does-not-change-how-the-arguments-are-read
+    (let ([option (parse-metavar '("-i" "a.txt" "--pair" "1" "2" "-e" "x" "y"))])
+      (CHECK equal? (option "input") "a.txt")
+      (CHECK equal? (option "pair") '(1 2))
+      (CHECK equal? (option "e") '("x" "y")))
+    (CHECK equal? (error-message (lambda () (parse-metavar '("--pair" "1" "x")))) "invalid argument value"))
+
+  (define-command-line-options parse-metavar-choices
+    [:long "--format" :metavar "fmt" :choices ("json" "text") :description "output format"]
+    [:long "--level" :metavar "n" :choices (1 2 4)]
+    [:long "--mode" :choices ("a" "b") :description "no metavar"])
+
+  (define-test test-metavar-with-choices-shows-the-choices-in-the-description
+    (CHECK equal? ((parse-metavar-choices '()) 'help)
+           (string-append "Usage: " (program-name) " [options]\n"
+                          "\n"
+                          "Options:\n"
+                          "      --format <fmt>  output format (one of: json, text)\n"
+                          "      --level <n>     (one of: 1, 2, 4)\n"
+                          "      --mode {a,b}    no metavar\n"
+                          "  -h, --help          show this help message and exit\n")))
+
+  (define-test test-metavar-with-choices-still-checks-the-choices
+    (CHECK equal? ((parse-metavar-choices '("--format" "json")) "format") "json")
+    (CHECK equal? (error-message (lambda () (parse-metavar-choices '("--format" "xml"))))
+           "argument must be one of the choices")
+    (CHECK equal? (error-irritants (lambda () (parse-metavar-choices '("--level" "3"))))
+           '("--level" "3" (1 2 4))))
+
+  (define-test test-metavar-with-choices-in-a-multi-line-description
+    (let ([parse (eval '(let ()
+                          (define-command-line-options p
+                            [:long "--format" :metavar "fmt" :choices ("json" "text")
+                             :description "first line\nsecond line"])
+                          p)
+                       definition-environment)])
+      (CHECK eq? (contains? ((parse '()) 'help)
+                            "      --format <fmt>  first line\n                      second line (one of: json, text)\n")
+             #t)))
+
+  (define-command-line-options parse-about
+    [:program :description "Copy files." :epilog "Example: cp-lite a b dest/"]
+    [:short "-v" :arity 0 :description "verbose"]
+    [:positional "source" :arity (1 +)]
+    [:positional "dest"])
+
+  (define-test test-description-and-epilog-are-in-the-usage
+    (CHECK equal? ((parse-about '("a" "b")) 'help)
+           (string-append "Usage: " (program-name) " [options] [--] <source>... <dest>\n"
+                          "\n"
+                          "Copy files.\n"
+                          "\n"
+                          "Arguments:\n"
+                          "  <source>...\n"
+                          "  <dest>\n"
+                          "\n"
+                          "Options:\n"
+                          "  -v" (spaces 10) "verbose\n"
+                          "  -h, --help  show this help message and exit\n"
+                          "\n"
+                          "Example: cp-lite a b dest/\n")))
+
+  (define-test test-the-program-clause-does-not-change-how-the-line-is-read
+    (let ([option (parse-about '("a" "-v" "b" "c"))])
+      (CHECK equal? (option "source") '("a" "b"))
+      (CHECK equal? (option "dest") "c")))
+
+  (define-test test-only-a-description
+    (let ([parse (eval '(let ()
+                          (define-command-line-options p
+                            [:program :description "Does a thing.\nIn two lines."])
+                          p)
+                       definition-environment)])
+      (CHECK equal? ((parse '()) 'help)
+             (string-append "Usage: " (program-name) " [options]\n"
+                            "\n"
+                            "Does a thing.\nIn two lines.\n"
+                            "\n"
+                            "Options:\n"
+                            "  -h, --help  show this help message and exit\n"))))
+
+  (define-test test-only-an-epilog
+    (let ([parse (eval '(let ()
+                          (define-command-line-options p
+                            [:program :epilog "See the manual."])
+                          p)
+                       definition-environment)])
+      (CHECK equal? ((parse '()) 'help)
+             (string-append "Usage: " (program-name) " [options]\n"
+                            "\n"
+                            "Options:\n"
+                            "  -h, --help  show this help message and exit\n"
+                            "\n"
+                            "See the manual.\n"))))
+
+  (define-test test-a-program-clause-without-fields-changes-nothing
+    (let ([parse (eval '(let ()
+                          (define-command-line-options p [:program] [:short "-q" :arity 0])
+                          p)
+                       definition-environment)])
+      (CHECK equal? ((parse '()) 'help)
+             (string-append "Usage: " (program-name) " [options]\n"
+                            "\n"
+                            "Options:\n"
+                            "  -q\n"
+                            "  -h, --help  show this help message and exit\n"))))
+
+  (define-test test-the-program-clause-may-be-anywhere-and-its-fields-in-any-order
+    (let ([parse (eval '(let ()
+                          (define-command-line-options p
+                            [:short "-q" :arity 0]
+                            [:version "1.0" :program :epilog "End."]
+                            [:positional "file"])
+                          p)
+                       definition-environment)])
+      (CHECK eq? (contains? ((parse '("f")) 'help) "\nEnd.\n") #t)))
+
+  (define-test test-format-usage-with-the-text-of-a-program
+    (CHECK equal? (format-usage '() "p" '() (make-program-ast "About." "Bye." #f #f))
+           (string-append "Usage: p [options]\n"
+                          "\n"
+                          "About.\n"
+                          "\n"
+                          "Options:\n"
+                          "  -h, --help  show this help message and exit\n"
+                          "\n"
+                          "Bye.\n")))
+
+  (define-test test-format-usage-with-a-version
+    (CHECK equal? (format-usage '() "p" '() (make-program-ast #f #f "1.2.3" #f))
+           (string-append "Usage: p [options]\n"
+                          "\n"
+                          "Options:\n"
+                          "  -h, --help     show this help message and exit\n"
+                          "  -V, --version  show the version and exit\n")))
 
   ;; ========================================
   ;; definition errors of :positional
@@ -2776,6 +3010,64 @@
        (#f [:short "-a" :required])
        (#f [:required :long "--abc"])
        (#f [:short "-a" :arity (0 +) :required]))))
+
+  (define-test test-definition-errors-of-the-metavar
+    (check-definition-rows
+     '((":metavar must not be empty or contain" [:short "-a" :metavar ""])
+       (":metavar must not be empty or contain" [:short "-a" :metavar "a b"])
+       (":metavar must not be empty or contain" [:short "-a" :metavar "a=b"])
+       (":metavar must not be empty or contain" [:short "-a" :metavar "a,b"])
+       (":metavar must be a string or a symbol" [:short "-a" :metavar 42])
+       ("a flag (arity 0) cannot have a :metavar" [:short "-a" :arity 0 :metavar "x"])
+       ("a flag (arity 0) cannot have a :metavar" [:short "-a" :arity (0 0) :metavar "x"])
+       ("duplicate field" [:short "-a" :metavar "x" :metavar "y"])
+       ("unknown field, or field without a value" [:short "-a" :metavar])
+       (":metavar is a field of an option, not of a :positional clause" [:positional "a" :metavar "x"])
+       (#f [:short "-a" :metavar "file"])
+       (#f [:short "-a" :metavar file])
+       (#f [:metavar "n" :short "-a" :arity (1 +)])
+       (#f [:short "-a" :metavar "n" :choices ("x" "y")])
+       (#f [:short "-a" :metavar "n" :type int :arity 2])
+       (#f [:short "-a" :metavar "-x"]))))
+
+  (define-test test-definition-errors-of-the-program-clause
+    (check-definition-rows
+     '(("only one :program clause is allowed" [:program :version "1"] [:program :description "x"])
+       ("only one :program clause is allowed" [:program] [:short "-a"] [:program])
+       ("duplicate field" [:program :program])
+       ("duplicate field" [:program :version "1" :version "2"])
+       ("duplicate field" [:program :description "a" :description "b"])
+       ("duplicate field" [:program :epilog "a" :epilog "b"])
+       (":description must be a string" [:program :description 42])
+       (":epilog must be a string" [:program :epilog 42])
+       (":version must be a string" [:program :version 1])
+       (":version must not be empty" [:program :version ""])
+       ("unknown field, or field without a value" [:program :version])
+       ("unknown field, or field without a value" [:program :short "-a"])
+       ("unknown field, or field without a value" [:program :arity 2])
+       ("unknown field, or field without a value" [:program :required])
+       ("unknown field, or field without a value" [:program :metavar "x"])
+       ("unknown field, or field without a value" [:program :positional "a"])
+       (#f [:program])
+       (#f [:program :description "d"])
+       (#f [:program :description "d" :epilog "e" :version "1.2.3"])
+       (#f [:version "1" :epilog "e" :program :description "d"])
+       (#f [:short "-a"] [:program :version "1"] [:positional "file"]))))
+
+  (define-test test-definition-errors-of-the-names-the-version-takes
+    (check-definition-rows
+     '(("-V and --version are reserved for the built-in version" [:program :version "1"] [:short "-V"])
+       ("-V and --version are reserved for the built-in version" [:program :version "1"] [:long "--version"])
+       ("-V and --version are reserved for the built-in version" [:long "--version"] [:program :version "1"])
+       ("-V and --version are reserved for the built-in version" [:program :version "1"] [:short "-a" :long "--version"])
+       ("-V and --version are reserved for the built-in version" [:program :version "1"] [:long "--V"])
+       ("-V and --version are reserved for the built-in version" [:program :version "1"] [:positional "version"])
+       ("-V and --version are reserved for the built-in version" [:program :version "1"] [:positional "V"])
+       ("-h and --help are reserved for the built-in help" [:program :version "1"] [:short "-h"])
+       (#f [:short "-V"])
+       (#f [:long "--version"])
+       (#f [:program :description "d"] [:short "-V" :long "--version"])
+       (#f [:program :version "1"] [:short "-v"] [:long "--verbose"] [:positional "file"]))))
 
   (define-test test-definition-errors-of-the-clause-grammar
     (check-definition-rows
