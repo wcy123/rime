@@ -48,7 +48,7 @@
              (set! help-asked? #t)
              (on-help (format-usage specs (program-name) positionals))
              '()]
-            [(option-like? (car tokens))
+            [(option-like? (car tokens) specs)
              (scan (parse-option (car tokens) (cdr tokens)))]
             [else (cons (unescape (car tokens)) (scan (cdr tokens)))]))
 
@@ -83,7 +83,7 @@
                  (values (reverse taken) tokens))))
 
          (define (argument-token? token)
-           (not (or (string=? token "--") (option-like? token))))
+           (not (or (string=? token "--") (option-like? token specs))))
 
          (define (store! spec name items)
            (hashtable-set! table spec (convert-items spec name items)))
@@ -316,10 +316,48 @@
   ;; tokens
   ;; ========================================
 
-  (define (option-like? token)
+  ;; A word is an option when it starts with a dash and is longer than the dash, except "--" and a
+  ;; number: -5 and -1.5 are values, unless an option is named exactly like that.
+  (define (option-like? token specs)
     (and (> (string-length token) 1)
          (char=? (string-ref token 0) #\-)
-         (not (string=? token "--"))))
+         (not (string=? token "--"))
+         (or (not (number-word? token))
+             (and (find-spec-by-token specs token) #t))))
+
+  ;; "-5", "-1.5", "-.5", "-1e3", "-2.5E-3": a dash, digits with an optional fraction (a dot needs
+  ;; digits after it), an optional exponent. By its shape, string->number would also take -i, -inf.0
+  ;; and -1/2.
+  (define (number-word? token)
+    (let* ([n (string-length token)]
+           [skip-digits (lambda (i)
+                          (let loop ([i i])
+                            (if (and (< i n) (char<=? #\0 (string-ref token i) #\9))
+                                (loop (+ i 1))
+                                i)))]
+           [integer-end (skip-digits 1)]
+           [integer? (> integer-end 1)]
+           [dot? (and (< integer-end n) (char=? (string-ref token integer-end) #\.))]
+           [fraction-end (if dot? (skip-digits (+ integer-end 1)) integer-end)]
+           [fraction? (and dot? (> fraction-end (+ integer-end 1)))])
+      (and (char=? (string-ref token 0) #\-)
+           (or integer? fraction?)
+           (or (not dot?) fraction?)        ; a dot needs digits after it
+           (or (= fraction-end n)
+               (exponent-ending-at-the-end? token fraction-end)))))
+
+  ;; the text from `start` is an exponent, e or E, an optional sign, digits, and nothing after it
+  (define (exponent-ending-at-the-end? token start)
+    (let ([n (string-length token)])
+      (and (< start n)
+           (memv (string-ref token start) '(#\e #\E))
+           (let* ([sign? (and (< (+ start 1) n) (memv (string-ref token (+ start 1)) '(#\+ #\-)))]
+                  [digits-start (if sign? (+ start 2) (+ start 1))])
+             (and (< digits-start n)
+                  (let loop ([i digits-start])
+                    (cond [(= i n) #t]
+                          [(char<=? #\0 (string-ref token i) #\9) (loop (+ i 1))]
+                          [else #f])))))))
 
   ;; "\-x" is the way to pass "-x" as a value
   (define (unescape token)

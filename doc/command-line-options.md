@@ -134,7 +134,8 @@ so it takes the place of `:type`: giving both is a syntax error, and so is givin
 * A choice is a string or an exact integer, and there is at least one. The value you get is the choice
   itself: `"yaml"`, or the integer `4` (no `:type int` needed). Strings and integers can be mixed.
 * An argument has to match exactly, with the same case. An integer matches its usual text, so `4`
-  matches `"4"` but not `"04"`; a negative one has to be escaped, `--delta '\-1'`.
+  matches `"4"` but not `"04"`; a negative one is written as it is, `--delta -1` (see
+  [Arguments starting with `-`](#arguments-starting-with--)).
 * Two choices with the same text are an error (`"1"` and `1`), since the second could never be chosen.
 * Every argument of an option with several arguments is checked, `-m a c`.
 * A wrong value raises `argument must be one of the choices` (see [Errors](#errors)).
@@ -306,19 +307,33 @@ An option given twice keeps its last occurrence.
 
 ## Arguments starting with `-`
 
-A word starting with `-` is an option. To use it as a value, escape the dash with a backslash,
-`\-`. This is the text the program receives, so the backslash has to survive the shell.
-In a shell, write `'\-x'` or `\\-x`.
+A word starting with `-` is an option, with one exception: a negative number is a value.
+`-5`, `-1.5`, `-.5`, `-1e3` and `-2.5E-3` are numbers, by their shape (a dash, digits, an optional
+fraction with digits after the dot, an optional exponent). So `-n -5`, `--delta -1` and a positional
+`-5` need no escape.
+
+```
+$ prog -n -5 -x -1.5          ; "count" => -5, "ratio" => -1.5
+$ prog --delta -1 -5          ; "delta" => -1, the word "-5" is positional
+$ prog -- -5                  ; the word "-5" is positional
+```
+
+If an option is named exactly like a number, `[:short "-1"]`, the word `-1` is that option. Any
+other number is still a value.
+
+Every other word that starts with `-` is an option, including `-5a`, `-0x10`, `-1/2`, `-inf`, `-1.`
+and `--5`. To use such a word as a value, escape the dash with a backslash, `\-`. This is the text the
+program receives, so the backslash has to survive the shell. In a shell, write `'\-x'` or `\\-x`.
 
 ```
 prog -s '\-x'                 ; -s gets "-x"
-prog -n '\-5'                 ; -n gets -5
+prog -s '\-0x10'              ; -s gets "-0x10"
 prog '\-file'                 ; positional "-file"
 prog --files='\-a,b'          ; "-a" "b"
+prog -n '\-5'                 ; the escape still works for a number: -n gets -5
 ```
 
 A lone `-` is a value, not an option, and so is any word after `--`.
-So, negative numbers must be written `\-5`: `-n -5` is `too few arguments for option`.
 
 # Help
 
