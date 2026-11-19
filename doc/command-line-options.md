@@ -540,8 +540,7 @@ The exported macro is just those two calls.
 |-------------------------------------|------------------------------------------------------------------------------|
 | `../command-line-options.sls`       | the exported macro: `(generate-definition parser options positional)`, from `(parse-options clauses)` |
 | `__parse.sls`                       | phase 1, read: walks the clauses and fields by pattern matching, builds records |
-| `__ast.sls`                         | the `option-ast` and `positional-ast` records, their `option-spec` and `positional-spec` constructors, and the semantic rules (names, arity, converter, duplicates) |
-| `__spec.sls`                        | `define-field-constructor`, which defines a constructor that takes the fields of a record by name, in any order, with defaults |
+| `__ast.sls`                         | the `option-ast` and `positional-ast` records, and the semantic rules (names, arity, converter, duplicates) |
 | `__codegen.sls`                     | phase 2, write: generates the definition, which builds the same records again at runtime; never reads user syntax |
 | `__keywords.sls`                    | the field keywords `:short :long :arity :type :choices :description :required :positional` |
 | `__runtime.sls`                      | the runtime: parses the command line, builds the accessor, prints the usage; the builtin converters |
@@ -550,17 +549,11 @@ A converter is an object with a label for the usage and a conversion that raises
 runtime does not know which kinds there are. Adding a kind of converter means one constructor in
 `__runtime.sls` (like `make-choice-converter`); a builtin type is also an entry in `builtin-converters`.
 Adding a field to the clause syntax means a keyword in `__keywords.sls` and a pattern in `__parse.sls`,
-a field in the record, one more entry in its `option-spec` definition and a rule in `__ast.sls` if it has
-one, and a line in `__codegen.sls`.
+a field in the record and a rule in `__ast.sls` if it has one, and a line in `__codegen.sls`.
 
-The records are built by name: `(option-spec [short "-n"] [long "--count"] [max 2])` is the record with those
-fields and the default for the others (no converter, no description, not required, ...), and
-`positional-spec` is the same for a positional, where `[name ...]` has to be given. The generated code
-writes only the fields that are not the default, so it, and the tests that build records, do not change when a
-field is added; `make-option-ast`, which takes every field in order, is still there. A field that is
-not known, given twice, or not written `[name value]` is a syntax violation. The procedures the reader uses
-to set a field once, `option-ast-<field>-set-if-not-given-yet!`, are generated from the list of fields
-by `define-field-setters`.
+The reader sets each field of a clause at most once: the procedures it uses,
+`option-ast-<field>-set-if-not-given-yet!`, call `on-duplicate` for a field that was given already, and they
+are generated from the list of fields of each record by `define-field-setters` in `__ast.sls`.
 
 # Tests
 

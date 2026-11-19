@@ -22,12 +22,10 @@
           option-ast-description-set-if-not-given-yet!
           option-ast-required-set-if-not-given-yet!
           option-ast?
-          option-spec
           option-lookup-names
           make-positional-ast
           make-unbound-positional-ast
           positional-ast?
-          positional-spec
           positional-ast-name
           positional-ast-min
           positional-ast-max
@@ -47,9 +45,7 @@
           check-options
           check-positionals)
   (import (rnrs (6))
-          (for (rnrs (6)) expand)
-          (rime command-line-options __spec)
-          (for (rime command-line-options __spec) expand))
+          (for (rnrs (6)) expand))
 
   ;; the value of a field that has not been set yet; not #f, which is a value
   (define unbound (list 'unbound))
@@ -108,13 +104,11 @@
   ;;     no :type, no :choices     => #f
   ;;
   ;;   codegen (phase 2, __codegen.sls): that same expression is copied, as it is, into the
-  ;;   option-spec form of the generated code, so it is evaluated when the program starts.
-  ;;   The generated code lists only the fields that are not the default (see option-spec below),
-  ;;   so no converter at all is not mentioned:
+  ;;   make-option-ast call of the generated code, so it is evaluated when the program starts.
+  ;;   #f is copied as the literal #f:
   ;;
   ;;     [:short "-n" :long "--count" :type int :description "repeat count"]  becomes
-  ;;     (option-spec [short "-n"] [long "--count"] [converter (builtin-converter 'int)]
-  ;;                  [description "repeat count"])
+  ;;     (make-option-ast "-n" "--count" 1 1 (builtin-converter 'int) "repeat count" #f #f)
   ;;
   ;;   runtime (__runtime.sls): the expression has been evaluated, so the field holds the converter
   ;;   object itself: a label for the usage ("<int>", "{json,text}") and a procedure that converts
@@ -123,13 +117,6 @@
   ;; While a clause is being read, the fields it has not given yet are `unbound`. The reader sets
   ;; them in place, only with the option-ast-<field>-set-if-not-given-yet! procedures below, and
   ;; option-ast-fill-defaults! gives the fields that are still unbound their defaults.
-  ;;
-  ;; Building a record: make-option-ast takes all the fields in the order above, and option-spec
-  ;; takes them by name, in any order, and the ones that are not given have their default. Prefer
-  ;; option-spec, it does not change when a field is added:
-  ;;
-  ;;   (option-spec [short "-n"] [long "--count"] [max 2])
-  ;;     = (make-option-ast "-n" "--count" 1 2 #f "" #f #f)
   (define-record-type option-ast
     (fields (mutable short)
             (mutable long)
@@ -139,9 +126,6 @@
             (mutable description)
             source
             (mutable required)))
-
-  (define-field-constructor option-spec make-option-ast
-    (short #f) (long #f) (min 1) (max 1) (converter #f) (description "") (source #f) (required #f))
 
   (define-field-setters option-ast short long min max converter description required)
 
@@ -159,10 +143,6 @@
             (mutable converter)
             (mutable description)
             source))
-
-  ;; the name has no default, a positional always has one
-  (define-field-constructor positional-spec make-positional-ast
-    (name) (min 1) (max 1) (converter #f) (description "") (source #f))
 
   (define-field-setters positional-ast name min max converter description)
 
