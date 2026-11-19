@@ -435,22 +435,63 @@
   ;; parse errors
   ;; ========================================
 
-  ;; a word is an option only when it is the name of a defined option: any other word, whatever it
-  ;; starts with, is an ordinary word (a positional word, or an argument of the option before it)
+  ;; a word is an option only when it is the name of a defined option. An undefined word that starts
+  ;; with a single dash is an ordinary word (a positional word, or an argument of the option before
+  ;; it); an undefined word that starts with -- is a mistyped option, see below
   (define-test test-an-undefined-dash-word-is-a-positional-word
     (CHECK equal? ((parse '("-z")) "args") '("-z"))
-    (CHECK equal? ((parse '("--nope")) "args") '("--nope"))
-    (CHECK equal? ((parse '("--nope=1")) "args") '("--nope=1"))
+    (CHECK equal? ((parse '("-z=1")) "args") '("-z=1"))
     (CHECK equal? ((parse '("-vq")) "args") '("-vq"))
+    (CHECK equal? ((parse '("-j4")) "args") '("-j4"))
     (CHECK equal? ((parse '("a" "-z" "b")) "args") '("a" "-z" "b")))
 
   (define-test test-an-undefined-dash-word-is-an-error-when-there-is-no-positional
     (CHECK equal? (error-message (lambda () (parse-none '("-z")))) "unexpected positional argument")
-    (CHECK equal? (error-irritants (lambda () (parse-none '("--nope=1")))) '("--nope=1")))
+    (CHECK equal? (error-irritants (lambda () (parse-none '("-z=1")))) '("-z=1")))
 
   (define-test test-an-undefined-dash-word-is-an-argument-of-the-option-before-it
-    (CHECK equal? ((parse '("-f" "a" "--nope" "b")) "f") '("a" "--nope" "b"))
+    (CHECK equal? ((parse '("-f" "a" "-z" "b")) "f") '("a" "-z" "b"))
     (CHECK equal? ((parse '("-s" "-z")) "s") "-z"))
+
+  (define-test test-an-unknown-long-option-is-an-error
+    (CHECK equal? (error-message (lambda () (parse '("--nope")))) "unknown option")
+    (CHECK equal? (error-irritants (lambda () (parse '("--nope")))) '("--nope"))
+    (CHECK equal? (error-irritants (lambda () (parse '("--nope=1")))) '("--nope=1"))
+    (CHECK equal? (error-message (lambda () (parse '("a" "--nope" "b")))) "unknown option")
+    (CHECK equal? (error-message (lambda () (parse '("---x")))) "unknown option")
+    (CHECK equal? (error-message (lambda () (parse '("--5")))) "unknown option"))
+
+  (define-test test-a-mistyped-long-option-is-not-a-file-name
+    ;; the program has a variadic positional: "--verbos" used to become one of the files
+    (CHECK equal? (error-irritants (lambda () (parse '("--verbos" "a.txt")))) '("--verbos"))
+    (CHECK equal? (error-irritants (lambda () (parse '("--colour" "red" "a.txt")))) '("--colour")))
+
+  (define-test test-an-unknown-long-option-is-a-command-line-error-with-the-usage
+    (let ([e (raised (lambda () (parse '("--verbos" "a.txt"))))])
+      (CHECK eq? (command-line-error? e) #t)
+      (CHECK equal? (command-line-error-usage e) ((parse '()) "help"))))
+
+  (define-test test-an-unknown-long-option-without-positional-words-is-unknown-not-unexpected
+    (CHECK equal? (error-message (lambda () (parse-none '("--nope")))) "unknown option"))
+
+  (define-test test-an-unknown-long-option-stops-the-arguments-of-an-option
+    ;; -f takes one or more arguments; it stops at the mistyped option, as it stops at an option name
+    (CHECK equal? (error-message (lambda () (parse '("-f" "a" "--nope" "b")))) "unknown option")
+    (CHECK equal? (error-message (lambda () (parse '("-s" "--nope")))) "too few arguments for option"))
+
+  (define-test test-a-value-that-starts-with-two-dashes
+    ;; after =, after --, or with the escape
+    (CHECK equal? ((parse '("-s=--nope")) "s") "--nope")
+    (CHECK equal? ((parse '("--name=--nope")) "s") "--nope")
+    (CHECK equal? ((parse '("-s" "\\--nope")) "s") "--nope")
+    (CHECK equal? ((parse '("\\--nope")) "args") '("--nope"))
+    (CHECK equal? ((parse '("--" "--nope")) "args") '("--nope"))
+    (CHECK equal? ((parse '("-v" "--" "--nope" "--other")) "args") '("--nope" "--other")))
+
+  (define-test test-defined-long-options-are-not-unknown
+    (CHECK eqv? ((parse '("--count=3")) "n") 3)
+    (CHECK eqv? ((parse '("--count" "3")) "n") 3)
+    (CHECK eq? ((parse '("--verbose")) "v") #t))
 
   (define-test test-help-with-an-equals-is-not-the-help
     (CHECK equal? ((parse '("-h=x")) "args") '("-h=x")))
@@ -500,7 +541,7 @@
     (for-each
      (lambda (word)
        (CHECK equal? (list word ((parse (list word)) "args")) (list word (list word))))
-     '("-5a" "-0x10" "-1/2" "-inf" "-e5" "-1e" "-1." "-." "-1.2.3" "-+5" "-5-" "--5" "-1e+" "-i")))
+     '("-5a" "-0x10" "-1/2" "-inf" "-e5" "-1e" "-1." "-." "-1.2.3" "-+5" "-5-" "-1e+" "-i")))
 
   (define-test test-a-word-like-a-number-but-not-a-number-can-be-escaped
     (CHECK equal? ((parse '("\\-5a")) "args") '("-5a"))
@@ -1821,7 +1862,10 @@
     (CHECK equal? (mixed '("-emit=a" "f" "-emit=b")) '("b" #f #f ("f"))))
 
   (define-test test-mixed-undefined-dash-word-after-positional
-    (CHECK equal? ((parse-mixed '("f" "--nope")) "files") '("f" "--nope")))
+    (CHECK equal? ((parse-mixed '("f" "-nope")) "files") '("f" "-nope")))
+
+  (define-test test-mixed-unknown-long-option-after-positional
+    (CHECK equal? (error-message (lambda () (parse-mixed '("f" "--nope")))) "unknown option"))
   ;; ========================================
   ;; (option 'help), the usage as a string
   ;; ========================================
@@ -2350,10 +2394,11 @@
     (CHECK equal? (scan '("-h")) '(() #t 1 #f)))
 
   (define-test test-scan-tokens-a-word-that-is-not-an-option-is-a-word
-    (CHECK equal? (scan '("--nope")) '(("--nope") #f 0 #f))
+    (CHECK equal? (scan '("-nope")) '(("-nope") #f 0 #f))
     (CHECK equal? (scan '("-5" "-n" "-6")) '(("-5") #f 0 (-6))))
 
   (define-test test-scan-tokens-errors
+    (CHECK equal? (error-message (lambda () (scan '("--nope")))) "unknown option")
     (CHECK equal? (error-message (lambda () (scan '("-n")))) "too few arguments for option")
     (CHECK equal? (error-message (lambda () (scan '("-v=1")))) "option does not take arguments"))
 
