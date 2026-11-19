@@ -295,8 +295,61 @@ What an option gives depends on its arity:
 | anything else            | the list of converted values   | `()`     |
 
 The words of a `:positional` clause follow the same table, so with arity `1` the word itself is
-returned, and with any other arity the list of words. An option that is given more than once keeps
-its last occurrence. Asking for a name that was not defined, or any other kind of key, raises an error.
+returned, and with any other arity the list of words. A repeated option is described in
+[Repeating an option](#repeating-an-option). Asking for a name that was not defined, or any other kind of key, raises an error.
+
+## Repeating an option
+
+An option that is given more than once follows its arity:
+
+* An option with an upper limit holds at most `max` values: arity `0`, `1`, `2`, `(0 1)`, `(0 2)` and so on.
+  A later occurrence replaces the earlier one, the last one wins. This is what argparse and click do,
+  and it lets a wrapper or an alias set a default that the user can override.
+* An option without an upper limit is a list: arity `(1 +)`, `(0 +)`, `(n +)`. A later occurrence
+  adds its arguments to the list, in order, flat. This is how a repeated `-I dir` collects directories.
+
+```scheme
+(define-command-line-options parse
+  [:short "-n" :long "--count" :type int :description "repeat count"]
+  [:short "-s" :long "--size" :arity 2 :type int :description "width and height"]
+  [:short "-I" :long "--include" :arity (1 +) :description "directories to search"]
+  [:positional "file" :arity (0 +)])
+```
+
+```
+$ prog -n 1 -n 2                        ; one argument: the last one wins
+"count" => 2
+
+$ prog -s 10 20 -s 30 40                ; a fixed arity: the last one wins
+"size" => (30 40)
+
+$ prog -I a -I b                        ; no upper limit: they add up
+"include" => ("a" "b")
+
+$ prog -I a b -I c
+"include" => ("a" "b" "c")
+
+$ prog -I a -I b main.c                 ; the last -I also takes main.c
+"include" => ("a" "b" "main.c")
+"file" => ()
+
+$ prog -I a -I=b main.c                 ; = takes exactly one argument
+"include" => ("a" "b")
+"file" => ("main.c")
+
+$ prog -I a -I b -- main.c              ; -- ends the options
+"include" => ("a" "b")
+"file" => ("main.c")
+```
+
+* The values keep their type: a value is a flat list of the same kind of value however many times the
+  option was given, `(1 2)` or `(1 2 3 4)`; the occurrences are not kept apart.
+* Each occurrence is converted and checked on its own, so a bad value in the second one is
+  `invalid argument value`.
+* An option without a limit takes every ordinary word after it, also after the last occurrence, as always:
+  `-I a -I b main.c` gives `main.c` to `-I`. Write `-I=b main.c`, which takes exactly one argument,
+  or put `--` before the file.
+* A default given to the accessor is used only when the option was not given at all.
 
 ## A default for an option that was not given
 
@@ -414,7 +467,7 @@ prog in.txt -- -v             ; positional: "in.txt" "-v"   (-v is NOT the flag 
 An option with arity `(min max)` takes the following ordinary words until it has `max` of them, or the
 next word is an option or `--`. With arity `(1 +)`, `prog a -e x y b` gives `-e` the words `"x" "y" "b"`
 and the positional word `"a"`; write `prog a -e x y -- b` to keep `b` positional.
-An option given twice keeps its last occurrence.
+A repeated option is described in [Repeating an option](#repeating-an-option).
 
 ## Words that start with `-`
 

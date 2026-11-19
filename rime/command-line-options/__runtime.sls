@@ -124,8 +124,14 @@
   (define (argument-token? token specs)
     (not (or (string=? token "--") (option-like? token specs))))
 
+  ;; An option with an upper limit holds at most max values, so a later occurrence replaces the earlier
+  ;; one. An option without a limit, (1 +), is a list, and a later occurrence adds to it.
   (define (store! table spec name items)
-    (hashtable-set! table spec (convert-items spec name items)))
+    (let ([values (convert-items spec name items)])
+      (hashtable-set! table spec
+                      (if (= (option-ast-max spec) unlimited)
+                          (append (hashtable-ref table spec '()) values)
+                          values))))
 
   ;; the converter reports its own failure, it is given the name of the option for that
   (define (convert-items spec name items)
