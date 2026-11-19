@@ -2,7 +2,7 @@
 (library (rime command-line-options)
   (export define-command-line-options
           parse-or-exit command-line-error? command-line-error-usage
-          :short :long :arity :type :choices :description :required :positional)
+          :short :long :arity :type :choices :description :required :positional :default)
   (import (rnrs (6))
           (for (rnrs (6)) expand)
           (for (rime command-line-options __parse) expand)
@@ -15,6 +15,7 @@
   ;;   clause = [field ...]
   ;;   field  = :short name | :long name | :arity n | (min max) | (min +) | :type type
   ;;          | :choices (literal ...) | :description "text" | :required
+  ;;          | :default word | (word ...)
   ;;   a clause with :positional name describes positional words: [:positional name field ...]
   ;;   name   = "-x" or -x, "--long" or --long; a clause needs a :short or a :long
   ;; defines (parser arguments [on-help]) => accessor procedure; on-help takes the usage text and

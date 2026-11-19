@@ -14,6 +14,8 @@
           option-ast-description
           option-ast-source
           option-ast-required
+          option-ast-default
+          option-ast-with-default
           option-ast-short-set-if-not-given-yet!
           option-ast-long-set-if-not-given-yet!
           option-ast-min-set-if-not-given-yet!
@@ -21,6 +23,7 @@
           option-ast-converter-set-if-not-given-yet!
           option-ast-description-set-if-not-given-yet!
           option-ast-required-set-if-not-given-yet!
+          option-ast-default-set-if-not-given-yet!
           option-ast?
           option-lookup-names
           make-positional-ast
@@ -88,6 +91,11 @@
   ;; description string
   ;; source      opaque, where the option came from; only handed back to `report` below, #f at runtime
   ;; required    boolean, #t when it is an error that the option is absent; never #t for a flag
+  ;; default     the words the option has when it is not given, as the user would have typed them:
+  ;;               a list of strings, #f when there is no default (an empty list is a default);
+  ;;               never given for a flag, nor together with :required. The record is made without
+  ;;               it, (make-option-ast ...) has no argument for it, and option-ast-with-default
+  ;;               sets it. At runtime the words are converted like the words of the command line.
   ;;
   ;; The record is the same at compile time and at runtime: the generated code builds it again
   ;; (__codegen.sls) and the runtime works with it (__runtime.sls).
@@ -125,9 +133,14 @@
             (mutable converter)
             (mutable description)
             source
-            (mutable required)))
+            (mutable required)
+            (mutable default))
+    (protocol
+     (lambda (new)
+       (lambda (short long min max converter description source required)
+         (new short long min max converter description source required #f)))))
 
-  (define-field-setters option-ast short long min max converter description required)
+  (define-field-setters option-ast short long min max converter description required default)
 
   ;; The :positional clause: the words of the command line that are not options.
   ;; name         string, what the program reads them by, and what the usage shows: <name>
@@ -158,9 +171,17 @@
 
   ;; an option that only has its source, everything else is still to be read
   (define (make-unbound-option-ast source)
-    (make-option-ast unbound unbound unbound unbound unbound unbound source unbound))
+    (let ([option (make-option-ast unbound unbound unbound unbound unbound unbound source unbound)])
+      (option-ast-default-set! option unbound)
+      option))
 
-  ;; the defaults: no names, exactly one argument, no converter, no description, not required;
+  ;; the option itself, with the default words set; it is how generated code gives a default
+  (define (option-ast-with-default option words)
+    (option-ast-default-set! option words)
+    option)
+
+  ;; the defaults: no names, exactly one argument, no converter, no description, not required,
+  ;; no default value;
   ;; only the fields that are still unbound are set
   (define (option-ast-fill-defaults! option)
     (option-ast-short-set-if-not-given-yet! option #f ignore)
@@ -169,7 +190,8 @@
     (option-ast-max-set-if-not-given-yet! option 1 ignore)
     (option-ast-converter-set-if-not-given-yet! option #f ignore)
     (option-ast-description-set-if-not-given-yet! option "" ignore)
-    (option-ast-required-set-if-not-given-yet! option #f ignore))
+    (option-ast-required-set-if-not-given-yet! option #f ignore)
+    (option-ast-default-set-if-not-given-yet! option #f ignore))
 
   (define (ignore) #f)
 
@@ -197,7 +219,15 @@
     (when (and (flag? option) (option-ast-converter option))
       (problem ":type and :choices must not be given when arity is 0"))
     (when (and (flag? option) (option-ast-required option))
-      (problem "a flag (arity 0) cannot be :required")))
+      (problem "a flag (arity 0) cannot be :required"))
+    (let ([default (option-ast-default option)])
+      (when default
+        (when (flag? option)
+          (problem ":default is not allowed for a flag (arity 0)"))
+        (when (option-ast-required option)
+          (problem ":default and :required cannot be given together"))
+        (unless (<= (option-ast-min option) (length default) (option-ast-max option))
+          (problem ":default does not fit the arity")))))
 
   ;; The names the program uses to read an option are the names without their dashes. They must be
   ;; unique across all options, and must not be the names of the built-in help.

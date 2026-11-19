@@ -43,4 +43,9 @@
                   [converter (or (option-ast-converter option) #'#f)]
                   [description (datum->syntax #'here (option-ast-description option))]
                   [required (datum->syntax #'here (option-ast-required option))])
-      #'(make-option-ast short long min max converter description #f required))))
+      (let ([spec #'(make-option-ast short long min max converter description #f required)])
+        (if (option-ast-default option)
+            (with-syntax ([spec spec]
+                          [default (datum->syntax #'here (option-ast-default option))])
+              #'(option-ast-with-default spec 'default))
+            spec)))))

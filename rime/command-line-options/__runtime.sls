@@ -62,6 +62,7 @@
                  [table (parse-result-table result)])
             (unless (parse-result-help-asked? result)
               (check-required specs table)
+              (apply-defaults! specs table)
               (store-positional-words! table (distribute-words positionals (parse-result-words result))))
             (make-accessor specs positionals table))))]))
 
@@ -185,6 +186,18 @@
         '()
         (cons (car list) (list-head (cdr list) (- count 1)))))
 
+  ;; an option that was not given gets its default: the words are converted like the words of the
+  ;; command line, but they are not read for escapes, they are not words that were typed
+  (define (apply-defaults! specs table)
+    (for-each
+     (lambda (spec)
+       (when (and (option-ast-default spec) (not (hashtable-contains? table spec)))
+         (let ([convert (converter-convert (spec-converter spec))]
+               [name (or (option-ast-long spec) (option-ast-short spec))])
+           (hashtable-set! table spec
+                           (map (lambda (word) (convert word name)) (option-ast-default spec))))))
+     specs))
+
   ;; the first required option that was not given is an error; the long name is the one to show
   (define (check-required specs table)
     (for-each
@@ -296,8 +309,19 @@
                                  positionals))))
           "\n"
           "Options:\n"
-          (format-rows (map (lambda (spec) (cons (flags spec) (option-ast-description spec)))
+          (format-rows (map (lambda (spec) (cons (flags spec) (describe-with-default spec)))
                             specs))))]))
+
+  ;; the description, with the default added to its first line: "repeat count (default: 3)"
+  (define (describe-with-default spec)
+    (let ([description (option-ast-description spec)]
+          [default (option-ast-default spec)])
+      (if (and default (pair? default))
+          (let* ([lines (split-lines description)]
+                 [shown (string-append "(default: " (join default ", ") ")")]
+                 [first (if (string=? (car lines) "") shown (string-append (car lines) " " shown))])
+            (join (cons first (cdr lines)) "\n"))
+          description)))
 
   ;; rows is a list of (label . description); the descriptions line up, a multi-line description is
   ;; indented under its first line

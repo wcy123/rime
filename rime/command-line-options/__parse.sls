@@ -11,7 +11,8 @@
           (rime command-line-options __keywords)
           (rime command-line-options __ast)
           (only (rime command-line-options __runtime)
-                builtin-converters builtin-converter make-choice-converter procedure->converter))
+                builtin-converters builtin-converter make-choice-converter procedure->converter
+                converter-convert))
 
   ;; (parse-options clauses) => (values options positionals)
   ;;   input   clauses: the syntax of `clause ...` in (define-command-line-options parser clause ...),
@@ -72,6 +73,7 @@
         (read-positional-clause clause)
         (let ([option (read-fields clause (make-unbound-option-ast clause))])
           (option-ast-fill-defaults! option)
+          (check-default-fits option)
           option)))
 
   ;; a clause is a :positional clause when the keyword is in it, in any place
@@ -93,7 +95,7 @@
       positional))
 
   (define (read-positional-fields fields positional)
-    (syntax-case fields (:positional :arity :type :choices :description :short :long :required)
+    (syntax-case fields (:positional :arity :type :choices :description :short :long :required :default)
       [() positional]
       [(:positional value . rest)
        (begin
@@ -126,6 +128,8 @@
        (violation ":long is a field of an option, not of a :positional clause" fields)]
       [(:required . _)
        (violation ":required is a field of an option, not of a :positional clause" fields)]
+      [(:default . _)
+       (violation ":default is a field of an option, not of a :positional clause" fields)]
       [(bad . _)
        (violation "unknown field, or field without a value (expected :positional :arity :type :choices :description)"
                   #'bad)]
@@ -143,7 +147,7 @@
   ;;   (read-fields #'(:type int :long "--count") option)
   ;;   => long = "--count", converter = (builtin-converter 'int); the other fields are still unbound
   (define (read-fields fields option)
-    (syntax-case fields (:short :long :arity :type :choices :description :required)
+    (syntax-case fields (:short :long :arity :type :choices :description :required :default)
       [() option]
       [(:short value . rest)
        (begin
@@ -175,12 +179,16 @@
          (option-ast-description-set-if-not-given-yet!
           option (read-description #'value) (duplicate #'value))
          (read-fields #'rest option))]
+      [(:default value . rest)
+       (begin
+         (option-ast-default-set-if-not-given-yet! option (read-default #'value) (duplicate #'value))
+         (read-fields #'rest option))]
       [(:required . rest)
        (begin
          (option-ast-required-set-if-not-given-yet! option #t (duplicate fields))
          (read-fields #'rest option))]
       [(bad . _)
-       (violation "unknown field, or field without a value (expected :short :long :arity :type :choices :description :required)"
+       (violation "unknown field, or field without a value (expected :short :long :arity :type :choices :description :required :default)"
                   #'bad)]
       [_ (violation "an option clause is a list of :key value pairs" fields)]))
 
@@ -255,6 +263,42 @@
       (cond [(string? datum) datum]
             [(and (integer? datum) (exact? datum)) (number->string datum)]
             [else (violation "a choice must be a string or an integer" form)])))
+
+  ;; the :default value -> the list of words, as the user would have typed them
+  ;;   "3"  => ("3")     3  => ("3")     ("a" "b") => ("a" "b")     () => ()
+  (define (read-default form)
+    (let ([datum (syntax->datum form)])
+      (cond [(default-word datum) => list]
+            [(and (list? datum) (for-all default-word datum)) (map default-word datum)]
+            [else (violation ":default must be a string, an integer, or a list of them" form)])))
+
+  (define (default-word datum)
+    (cond [(string? datum) datum]
+          [(and (integer? datum) (exact? datum)) (number->string datum)]
+          [else #f]))
+
+  ;; A default is a syntax violation when the words cannot be converted by the type of the option,
+  ;; or are not among its choices. The builtin types and the choices can be tried here, the same
+  ;; converters the program uses; a procedure of the user can only be run by the program.
+  (define (check-default-fits option)
+    (let ([words (option-ast-default option)]
+          [expression (option-ast-converter option)])
+      (when (and words expression)
+        (syntax-case expression (builtin-converter make-choice-converter quote)
+          [(builtin-converter (quote name))
+           (let ([convert (converter-convert (builtin-converter (syntax->datum #'name)))])
+             (unless (for-all (lambda (word) (converts? convert word)) words)
+               (violation ":default is not a valid value for :type" (option-ast-source option))))]
+          [(make-choice-converter (quote choices))
+           (let ([convert (converter-convert (make-choice-converter (syntax->datum #'choices)))])
+             (unless (for-all (lambda (word) (converts? convert word)) words)
+               (violation ":default must be one of the :choices" (option-ast-source option))))]
+          [_ #f]))))
+
+  (define (converts? convert word)
+    (guard (e [else #f])
+      (convert word "default")
+      #t))
 
   (define (read-description form)
     (if (string? (syntax->datum form))
