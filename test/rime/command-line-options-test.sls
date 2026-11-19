@@ -2068,8 +2068,11 @@
     (CHECK equal? (scan '("a" "--help" "b" "-n" "3")) '(("a") #t 1 #f))
     (CHECK equal? (scan '("-h")) '(() #t 1 #f)))
 
+  (define-test test-scan-tokens-a-word-that-is-not-an-option-is-a-word
+    (CHECK equal? (scan '("--nope")) '(("--nope") #f 0 #f))
+    (CHECK equal? (scan '("-5" "-n" "-6")) '(("-5") #f 0 (-6))))
+
   (define-test test-scan-tokens-errors
-    (CHECK equal? (error-message (lambda () (scan '("--nope")))) "unknown option")
     (CHECK equal? (error-message (lambda () (scan '("-n")))) "too few arguments for option")
     (CHECK equal? (error-message (lambda () (scan '("-v=1")))) "option does not take arguments"))
 
