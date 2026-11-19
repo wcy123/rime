@@ -24,7 +24,7 @@
 (define (show name value)
   (display name) (display " => ") (write value) (newline))
 
-(show "verbose" (option "verbose"))       ; present or absent
+(show "verbose" (option "verbose"))       ; #t or #f
 (show "count" (option "count"))           ; an integer, or #f
 (show "exclude" (option "exclude"))       ; a list of strings
 (show "retries" (option "retries"))       ; an integer, or #f

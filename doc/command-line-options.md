@@ -16,7 +16,7 @@ accessor for the options and the positional arguments. It works on Chez Scheme a
 
 (define option (parse (cdr (command-line))))   ; for `prog -v --count 3 -e a b -- x`
 
-(option "verbose")                     ; => present
+(option "verbose")                     ; => #t
 (option "count")                       ; => 3
 (option "n")                           ; => 3   (short and long name are the same option)
 (option "exclude")                     ; => ("a" "b")
@@ -257,7 +257,7 @@ What an option gives depends on its arity:
 
 | arity                    | given                          | absent   |
 |--------------------------|--------------------------------|----------|
-| `0`                      | `present`                      | `absent` |
+| `0`                      | `#t`                           | `#f`     |
 | `1` (also `(1 1)`)       | the converted value            | `#f`     |
 | anything else            | the list of converted values   | `()`     |
 
@@ -325,7 +325,7 @@ the `--` itself is dropped.
 
 ```
 prog -v in.txt out.txt        ; positional: "in.txt" "out.txt"
-prog in.txt -v out.txt        ; positional: "in.txt" "out.txt", -v is present
+prog in.txt -v out.txt        ; positional: "in.txt" "out.txt", -v is `#t`
 prog -v -- -x                 ; positional: "-x"
 prog in.txt -- -v             ; positional: "in.txt" "-v"   (-v is NOT the flag here)
 ```
@@ -460,7 +460,7 @@ The examples above were run with this program (`grep-lite.scm`), with
 
 ```
 $ grep-lite
-"v" => absent
+"v" => #f
 "n" => #f
 "r" => #f
 "c" => #f
@@ -470,7 +470,7 @@ $ grep-lite
 "file" => ()
 
 $ grep-lite -v --count 3 -r 0.25 -c yes -e a b c -w 2 -t x in.txt out.txt
-"v" => present
+"v" => #t
 "n" => 3
 "r" => 0.25
 "c" => #t
@@ -480,7 +480,7 @@ $ grep-lite -v --count 3 -r 0.25 -c yes -e a b c -w 2 -t x in.txt out.txt
 "file" => ("in.txt" "out.txt")
 
 $ grep-lite in.txt -v -n 3 out.txt
-"v" => present
+"v" => #t
 "n" => 3
 "r" => #f
 "c" => #f
@@ -490,7 +490,7 @@ $ grep-lite in.txt -v -n 3 out.txt
 "file" => ("in.txt" "out.txt")
 
 $ grep-lite --count=3 --exclude a b --window 1 2 -- -v file
-"v" => absent
+"v" => #f
 "n" => 3
 "r" => #f
 "c" => #f
@@ -500,7 +500,7 @@ $ grep-lite --count=3 --exclude a b --window 1 2 -- -v file
 "file" => ("-v" "file")
 
 $ grep-lite -t '\-dash' '\-file'
-"v" => absent
+"v" => #f
 "n" => #f
 "r" => #f
 "c" => #f
