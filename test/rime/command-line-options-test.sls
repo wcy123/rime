@@ -293,6 +293,19 @@
     (let ([option (parse '("--name="))])
       (CHECK equal? (option "s") "")))
 
+  (define-test test-form-equals-empty-value-is-one-empty-argument-even-when-the-option-may-take-none
+    (CHECK equal? ((parse '("--opt-list=")) "opt-list") '(""))
+    (CHECK equal? ((parse '("-o=")) "o") '(""))
+    ;; --range is an integer option, and an empty text is not an integer
+    (CHECK equal? (error-message (lambda () (parse '("--range=")))) "invalid argument value"))
+
+  (define-test test-form-equals-empty-value-is-one-empty-argument-when-the-option-needs-one
+    (CHECK equal? ((parse '("--files=")) "files") '(""))
+    (CHECK equal? ((parse '("-f=")) "f") '(""))
+    (CHECK equal? ((parse '("--name=")) "name") "")
+    (CHECK equal? (error-message (lambda () (parse '("--pair=")))) "too few arguments for option")
+    (CHECK equal? (error-message (lambda () (parse '("--count=")))) "invalid argument value"))
+
   (define-test test-form-mixed
     (let ([option (parse '("-v" "--count=2" "-f" "a" "b" "-s" "n" "--ratio" "0.5"))])
       (CHECK eq? (option "v") #t)
@@ -601,6 +614,25 @@
       (CHECK equal? (error-message (lambda () (option "-n"))) "unknown option")
       (CHECK equal? (error-message (lambda () (option "--count"))) "unknown option")
       (CHECK equal? (error-message (lambda () (option "h"))) "unknown option")))
+
+  (define-test test-accessor-unknown-option-lists-the-names-that-exist
+    (let ([option (parse '())])
+      (CHECK equal? (error-irritants (lambda () (option "nope")))
+             '("nope" ("v" "verbose" "q" "n" "count" "x" "ratio" "b" "flag" "s" "name" "f" "files"
+                       "r" "range" "p" "pair" "u" "upper" "o" "opt-list" "args")))
+      ;; the first irritant is the key as it was given, a symbol stays a symbol
+      (CHECK equal? (car (error-irritants (lambda () (option 'nope)))) 'nope)
+      (CHECK equal? (error-irritants (lambda () (option "h")))
+             (list "h" (cadr (error-irritants (lambda () (option "nope"))))))))
+
+  (define-test test-accessor-unknown-name-with-dashes-says-names-have-no-dashes
+    (let ([option (parse '())])
+      (CHECK equal? (error-irritants (lambda () (option "-n")))
+             '("-n" "names are read without the dashes"))
+      (CHECK equal? (error-irritants (lambda () (option "--count")))
+             '("--count" "names are read without the dashes"))
+      (CHECK equal? (error-irritants (lambda () (option (sym "-n"))))
+             (list (sym "-n") "names are read without the dashes"))))
 
   (define-test test-accessor-invalid-key
     (let ([option (parse '())])
@@ -1668,10 +1700,16 @@
     (let ([option (parse-names '())])
       (CHECK equal? (error-message (lambda () (option "-v"))) "unknown option")
       (CHECK equal? (error-message (lambda () (option "--level"))) "unknown option")
-      (CHECK equal? (error-irritants (lambda () (option "--level"))) '("--level"))))
+      (CHECK equal? (error-irritants (lambda () (option "--level")))
+             '("--level" "names are read without the dashes"))))
 
   (define-test test-lookup-of-an-undefined-name
     (CHECK equal? (error-message (lambda () ((parse-names '()) "nope"))) "unknown option"))
+
+  (define-test test-lookup-of-an-undefined-name-lists-the-names-of-the-options-once-each
+    ;; -emit and --emit are one option and one name
+    (CHECK equal? (error-irritants (lambda () ((parse-names '()) "nope")))
+           '("nope" ("emit" "v" "level"))))
 
   (define-test test-help-is-an-option-name
     (let ([option (parse-small '())])
@@ -1958,6 +1996,101 @@
       (CHECK equal? (error-irritants (lambda () (parse-with 2 3 '("a" "b" "c" "d" "e"))))
              '("d" "e"))))
 
+
+  ;; the positionals shared out as ((name word ...) ...), for the tests below
+  (define (shared-out positionals words)
+    (map (lambda (pair) (cons (positional-ast-name (car pair)) (cdr pair)))
+         (distribute-words positionals words)))
+
+  (define (positional-ast* name min max)
+    (make-positional-ast name min max #f "" #f))
+
+  (define-test test-distribute-words-gives-each-positional-its-words-in-order
+    (let ([cp (list (positional-ast* "source" 1 unlimited) (positional-ast* "dest" 1 1))]
+          [sandwich (list (positional-ast* "first" 1 1) (positional-ast* "middle" 0 unlimited)
+                          (positional-ast* "last" 1 1))]
+          [bounded (list (positional-ast* "x" 2 2) (positional-ast* "y" 0 2))])
+      (CHECK equal? (shared-out cp '("a" "b" "c")) '(("source" "a" "b") ("dest" "c")))
+      (CHECK equal? (shared-out cp '("a" "b")) '(("source" "a") ("dest" "b")))
+      (CHECK equal? (shared-out sandwich '("a" "z")) '(("first" "a") ("middle") ("last" "z")))
+      (CHECK equal? (shared-out sandwich '("a" "m" "n" "z"))
+             '(("first" "a") ("middle" "m" "n") ("last" "z")))
+      (CHECK equal? (shared-out bounded '("a" "b")) '(("x" "a" "b") ("y")))
+      (CHECK equal? (shared-out bounded '("a" "b" "c" "d")) '(("x" "a" "b") ("y" "c" "d")))))
+
+  (define-test test-distribute-words-with-no-positional
+    (CHECK equal? (shared-out '() '()) '())
+    (CHECK equal? (error-message (lambda () (shared-out '() '("a" "b")))) "unexpected positional argument")
+    (CHECK equal? (error-irritants (lambda () (shared-out '() '("a" "b")))) '("a" "b")))
+
+  (define-test test-distribute-words-errors
+    (let ([three (list (positional-ast* "a" 1 1) (positional-ast* "b" 1 1) (positional-ast* "c" 1 1))])
+      (CHECK equal? (error-irritants (lambda () (shared-out three '()))) '("a"))
+      (CHECK equal? (error-irritants (lambda () (shared-out three '("x")))) '("b"))
+      (CHECK equal? (error-irritants (lambda () (shared-out three '("x" "y")))) '("c"))
+      (CHECK equal? (error-message (lambda () (shared-out three '("x" "y")))) "too few positional arguments")
+      (CHECK equal? (error-message (lambda () (shared-out three '("x" "y" "z" "w"))))
+             "too many positional arguments")
+      (CHECK equal? (error-irritants (lambda () (shared-out three '("x" "y" "z" "w" "v")))) '("w" "v"))
+      (CHECK equal? (shared-out three '("x" "y" "z")) '(("a" "x") ("b" "y") ("c" "z")))))
+
+  ;; ========================================
+  ;; the steps of the parser, on specs built by hand
+  ;; ========================================
+
+  (define scan-specs
+    (list (make-option-ast "-v" "--verbose" 0 0 #f "" #f #f)
+          (make-option-ast "-n" "--count" 1 1 (builtin-converter 'int) "" #f #f)
+          (make-option-ast "-e" #f 1 unlimited #f "" #f #f)))
+
+  ;; (scan tokens) => (words help-asked? help-calls count-entry)
+  (define (scan tokens)
+    (let* ([calls 0]
+           [result (scan-tokens scan-specs (lambda () (set! calls (+ calls 1))) tokens)])
+      (list (parse-result-words result)
+            (parse-result-help-asked? result)
+            calls
+            (hashtable-ref (parse-result-table result) (cadr scan-specs) #f))))
+
+  (define-test test-scan-tokens-separates-options-from-words
+    (CHECK equal? (scan '("a" "-n" "3" "b")) '(("a" "b") #f 0 (3)))
+    (CHECK equal? (scan '("-v" "a")) '(("a") #f 0 #f))
+    (CHECK equal? (scan '()) '(() #f 0 #f)))
+
+  (define-test test-scan-tokens-double-dash-ends-the-options
+    (CHECK equal? (scan '("a" "--" "-n" "3")) '(("a" "-n" "3") #f 0 #f))
+    (CHECK equal? (scan '("--" "--")) '(("--") #f 0 #f)))
+
+  (define-test test-scan-tokens-unescapes-words-before-the-double-dash-only
+    (CHECK equal? (scan '("\\-a" "--" "\\-b")) '(("-a" "\\-b") #f 0 #f)))
+
+  (define-test test-scan-tokens-help-keeps-the-words-before-it-and-drops-the-rest
+    (CHECK equal? (scan '("a" "--help" "b" "-n" "3")) '(("a") #t 1 #f))
+    (CHECK equal? (scan '("-h")) '(() #t 1 #f)))
+
+  (define-test test-scan-tokens-a-word-that-is-not-an-option-is-a-word
+    (CHECK equal? (scan '("--nope")) '(("--nope") #f 0 #f))
+    (CHECK equal? (scan '("-5" "-n" "-6")) '(("-5") #f 0 (-6))))
+
+  (define-test test-scan-tokens-errors
+    (CHECK equal? (error-message (lambda () (scan '("-n")))) "too few arguments for option")
+    (CHECK equal? (error-message (lambda () (scan '("-v=1")))) "option does not take arguments"))
+
+  (define-test test-scan-tokens-an-unlimited-option-stops-at-an-option-or-the-double-dash
+    (let ([result (scan-tokens scan-specs (lambda () #f) '("-e" "x" "y" "-v" "z" "--" "w"))])
+      (CHECK equal? (hashtable-ref (parse-result-table result) (caddr scan-specs) #f) '("x" "y"))
+      (CHECK equal? (parse-result-words result) '("z" "w"))))
+
+  (define-test test-check-required-names-the-first-missing-option
+    (let ([specs (list (make-option-ast "-a" "--aa" 1 1 #f "" #f #t)
+                       (make-option-ast "-b" #f 1 1 #f "" #f #t)
+                       (make-option-ast "-c" #f 1 1 #f "" #f #f))]
+          [table (make-eq-hashtable)])
+      (CHECK equal? (error-irritants (lambda () (check-required specs table))) '("--aa"))
+      (hashtable-set! table (car specs) '("x"))
+      (CHECK equal? (error-irritants (lambda () (check-required specs table))) '("-b"))
+      (hashtable-set! table (cadr specs) '())
+      (CHECK equal? (begin (check-required specs table) 'no-error) 'no-error)))
   ;; ========================================
   ;; the usage of a positional
   ;; ========================================
@@ -2172,6 +2305,12 @@
 
   (define-test test-an-unknown-positional-name-is-unknown-with-several
     (CHECK equal? (error-message (lambda () ((parse-cp '("a" "b")) "other"))) "unknown option"))
+
+  (define-test test-the-names-in-the-unknown-name-error-include-the-positionals
+    (CHECK equal? (error-irritants (lambda () ((parse-cp '("a" "b")) "other")))
+           '("other" ("v" "source" "dest")))
+    (CHECK equal? (error-irritants (lambda () ((parse-none '()) "file")))
+           '("file" ("v"))))
 
   (define-test test-help-needs-no-positional-words-with-several
     (let ([shown #f])
