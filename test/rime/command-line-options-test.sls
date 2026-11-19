@@ -720,6 +720,64 @@
       (CHECK equal? (error-message (lambda () (option '(1)))) "invalid option key")))
 
   ;; ========================================
+  ;; (option "name" default): the default is the value when the option was not given
+  ;; ========================================
+
+  (define-test test-default-is-the-value-of-an-option-that-was-not-given
+    (let ([option (parse '())])
+      (CHECK eqv? (option "n" 3) 3)
+      (CHECK equal? (option "s" "text") "text")
+      (CHECK equal? (option "files" '("a")) '("a"))
+      (CHECK equal? (option "range" '(0 9)) '(0 9))))
+
+  (define-test test-default-is-not-used-when-the-option-was-given
+    (let ([option (parse '("-n" "5" "-s" "x" "-f" "a" "b"))])
+      (CHECK eqv? (option "n" 3) 5)
+      (CHECK equal? (option "s" "text") "x")
+      (CHECK equal? (option "files" '("d")) '("a" "b"))))
+
+  (define-test test-default-of-a-flag
+    (CHECK eq? ((parse '()) "q" 'unset) 'unset)
+    (CHECK eq? ((parse '("-q")) "q" 'unset) #t))
+
+  (define-test test-an-option-given-without-arguments-is-given
+    ;; -o takes zero or more arguments: -o alone is given, with no arguments
+    (CHECK equal? ((parse '("-o")) "opt-list" '("d")) '())
+    (CHECK equal? ((parse '()) "opt-list" '("d")) '("d")))
+
+  (define-test test-default-tells-not-given-from-given-as-false
+    (CHECK eq? ((parse '("-b" "off")) "b" 'unset) #f)
+    (CHECK eq? ((parse '("-b" "on")) "b" 'unset) #t)
+    (CHECK eq? ((parse '()) "b" 'unset) 'unset))
+
+  (define-test test-default-may-be-any-value
+    (CHECK eq? ((parse '()) "n" #f) #f)
+    (CHECK equal? ((parse '()) "n" '()) '())
+    (CHECK eqv? ((parse '()) "n" (+ 1 2)) 3))
+
+  (define-test test-default-of-the-positional-is-for-no-words
+    (CHECK equal? ((parse '()) "args" '("none")) '("none"))
+    (CHECK equal? ((parse '("a" "b")) "args" '("none")) '("a" "b"))
+    (CHECK equal? ((parse '()) "args") '()))
+
+  (define-test test-the-default-does-not-hide-a-wrong-name
+    (CHECK equal? (error-message (lambda () ((parse '()) "nope" 1))) "unknown option")
+    (CHECK equal? (error-message (lambda () ((parse '()) 42 1))) "invalid option key"))
+
+  (define-test test-help-ignores-the-default
+    (let ([option (parse '())])
+      (CHECK equal? (option "help" 'x) (option "help"))))
+
+  (define-test test-no-default-is-as-before
+    (let ([option (parse '())])
+      (CHECK eq? (option "n") #f)
+      (CHECK equal? (option "files") '())
+      (CHECK eq? (option "q") #f)))
+
+  (define-test test-at-most-one-default
+    (CHECK eq? (guard (e [#t 'raised]) ((parse '()) "n" 1 2) 'returned) 'raised))
+
+  ;; ========================================
   ;; names may also be given as symbols
   ;; ========================================
   ;; strict R6RS readers (Chez .sls) cannot read -v or --long as symbols, so build them
