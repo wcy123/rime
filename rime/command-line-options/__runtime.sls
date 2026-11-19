@@ -8,6 +8,7 @@
           program-name
           builtin-converters
           builtin-converter
+          make-choice-converter
           convert-bool
           convert-int
           convert-float
@@ -78,11 +79,15 @@
            (hashtable-set! table spec (convert-items spec name items)))
 
          (define (convert-items spec name items)
-           (map (lambda (item)
-                  (let ([text (unescape item)])
-                    (guard (e [else (fail "invalid argument value" name text)])
-                      ((or (option-ast-converter spec) convert-string) text))))
-                items))
+           (let ([converter (option-ast-converter spec)])
+             (map (lambda (item)
+                    (let ([text (unescape item)])
+                      (guard (e [else (if (choice-converter? converter)
+                                          (fail "argument must be one of the choices"
+                                                name text (choice-converter-choices converter))
+                                          (fail "invalid argument value" name text))])
+                        (apply-converter converter text))))
+                  items)))
 
          (make-accessor specs table (list->vector (scan args))))]))
 
@@ -171,8 +176,7 @@
   (define (placeholder spec)
     (let* ([min (option-ast-min spec)]
            [max (option-ast-max spec)]
-           [label (converter-label (option-ast-converter spec))]
-           [arg (string-append "<" label ">")]
+           [arg (converter-label (option-ast-converter spec))]
            [mandatory (repeat min arg)])
       (join
        (cond
@@ -184,15 +188,19 @@
          (append mandatory (repeat (- max min) (string-append "[" arg "]")))])
        " ")))
 
-  ;; the name of a converter in the usage: a builtin one by its name, no converter is text,
-  ;; a custom one is just a value
+  ;; how an argument of the converter is shown in the usage:
+  ;;   <int> for a builtin one, by its name; <string> for no converter, which is the text as it is;
+  ;;   {json,text} for a list of choices; <value> for a custom one
   (define (converter-label converter)
-    (if (not converter)
-        "string"
-        (let loop ([entries builtin-converters])
-          (cond [(null? entries) "value"]
-                [(eq? (cdr (car entries)) converter) (symbol->string (car (car entries)))]
-                [else (loop (cdr entries))]))))
+    (cond [(not converter) "<string>"]
+          [(choice-converter? converter)
+           (string-append "{" (join (map choice->text (choice-converter-choices converter)) ",") "}")]
+          [else
+           (let loop ([entries builtin-converters])
+             (cond [(null? entries) "<value>"]
+                   [(eq? (cdr (car entries)) converter)
+                    (string-append "<" (symbol->string (car (car entries))) ">")]
+                   [else (loop (cdr entries))]))]))
 
   (define (repeat n x)
     (if (= n 0) '() (cons x (repeat (- n 1) x))))
@@ -247,6 +255,26 @@
   ;; ========================================
   ;; converters, from the text of an argument to a value
   ;; ========================================
+
+  ;; (apply-converter converter text) => the value, or an error when the text does not suit
+  ;; a converter is a procedure, a list of choices, or #f for the text as it is
+  (define (apply-converter converter text)
+    (cond [(not converter) text]
+          [(choice-converter? converter) (choose (choice-converter-choices converter) text)]
+          [else (converter text)]))
+
+  ;; the choices are strings and exact integers; an integer is chosen by its usual text,
+  ;; and the value is the choice itself
+  (define (choose choices text)
+    (cond [(null? choices) (fail "not one of the choices" text)]
+          [(string=? (choice->text (car choices)) text) (car choices)]
+          [else (choose (cdr choices) text)]))
+
+  (define (choice->text choice)
+    (if (string? choice) choice (number->string choice)))
+
+  (define-record-type choice-converter
+    (fields choices))
 
   (define (convert-string s) s)
 

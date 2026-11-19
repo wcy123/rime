@@ -140,6 +140,86 @@
       ;; the identifier as it is, not a lookup by name: only string int float bool are builtin
       (CHECK equal? (syntax->datum (option-ast-converter o)) 'string-upcase)))
 
+  ;; ========================================
+  ;; :choices
+  ;; ========================================
+
+  (define (choice-converter-of . choices)
+    (syntax->datum (option-ast-converter (apply parse "-a" choices))))
+
+  (define-test test-choices-set-a-choice-converter
+    (CHECK equal? (choice-converter-of '(:choices ("json" "text")))
+           '(make-choice-converter '("json" "text")))
+    (CHECK equal? (choice-converter-of '(:choices ("only")))
+           '(make-choice-converter '("only"))))
+
+  (define-test test-choices-may-be-integers-or-a-mix
+    (CHECK equal? (choice-converter-of '(:choices (1 2 4)))
+           '(make-choice-converter '(1 2 4)))
+    (CHECK equal? (choice-converter-of '(:choices ("auto" 1 -2)))
+           '(make-choice-converter '("auto" 1 -2))))
+
+  (define-test test-choices-keep-their-order
+    (CHECK equal? (choice-converter-of '(:choices ("c" "a" "b")))
+           '(make-choice-converter '("c" "a" "b"))))
+
+  (define-test test-choices-are-the-only-converter-field
+    ;; there is no second field: the converter is the one place that says how an argument is read
+    (let ([o (parse "-a" '(:choices ("x" "y")) '(:description "d"))])
+      (CHECK equal? (option-ast-description o) "d")
+      (CHECK equal? (option-ast-min o) 1)))
+
+  (define-test test-choices-must-be-a-non-empty-list-of-strings-or-integers
+    (for-each
+     (lambda (bad)
+       (CHECK eq? (parse-fails? "-a" (list ':choices bad)) #t))
+     (list "json"            ; not a list
+           '()               ; empty
+           '(json)           ; a symbol
+           '(1.5)            ; not an integer
+           '(1.0)            ; an integer, but not an exact one
+           '(1/2)            ; not an integer
+           '(#\a)            ; a character
+           '(("a"))          ; a list in the list
+           '("a" json)       ; one bad literal among good ones
+           '("a" . "b")      ; improper list
+           42)))
+
+  (define-test test-choices-must-not-repeat
+    (CHECK eq? (parse-fails? "-a" '(:choices ("a" "b" "a"))) #t)
+    (CHECK eq? (parse-fails? "-a" '(:choices (1 2 1))) #t))
+
+  (define-test test-choices-that-match-the-same-text-are-duplicates
+    ;; "1" and 1 are different literals, but the argument 1 would match both: the second is unreachable
+    (CHECK eq? (parse-fails? "-a" '(:choices ("1" 1))) #t)
+    (CHECK eq? (parse-fails? "-a" '(:choices (7 "7"))) #t)
+    (CHECK equal? (choice-converter-of '(:choices ("1" 2)))
+           '(make-choice-converter '("1" 2))))
+
+  (define (violation-message thunk)
+    (guard (e [(syntax-violation? e) (condition-message e)]
+              [else #f])
+      (thunk)
+      #f))
+
+  (define-test test-choices-and-type-both-set-the-converter
+    (let ([message "the converter is given twice, use only one of :type and :choices"])
+      (CHECK equal? (violation-message (lambda () (parse "-a" '(:type int) '(:choices ("a")))))
+             message)
+      (CHECK equal? (violation-message (lambda () (parse "-a" '(:choices ("a")) '(:type int))))
+             message)))
+
+  (define-test test-choices-twice-is-a-duplicate
+    (CHECK eq? (parse-fails? "-a" '(:choices ("a")) '(:choices ("b"))) #t))
+
+  (define-test test-choices-on-a-flag-is-a-violation
+    (CHECK eq? (parse-fails? "-a" '(:arity 0) '(:choices ("a"))) #t)
+    (CHECK eq? (parse-fails? "-a" '(:arity (0 0)) '(:choices ("a"))) #t))
+
+  (define-test test-choices-are-fine-with-other-arities
+    (CHECK eq? (parse-fails? "-a" '(:arity (1 +)) '(:choices ("a" "b"))) #f)
+    (CHECK eq? (parse-fails? "-a" '(:arity (0 2)) '(:choices ("a" "b"))) #f))
+
   (define-test test-flag-has-no-converter
     (CHECK eq? (option-ast-converter (parse "-a" '(:arity 0))) #f))
 

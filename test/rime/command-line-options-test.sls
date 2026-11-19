@@ -812,6 +812,170 @@
             "  -h, --help         show this help message and exit\n")))
 
   ;; ========================================
+  ;; choices
+  ;; ========================================
+
+  (define-command-line-options with-choices
+    [:short "-f" :long "--format" :choices ("json" "text" "yaml") :description "output format"]
+    [:long "--level" :choices (1 2 4) :description "verbosity level"]
+    [:short "-m" :long "--mode" :arity (1 +) :choices ("a" "b" "c")]
+    [:long "--mixed" :choices ("auto" 1 2)]
+    [:long "--delta" :choices (-1 0 1)]
+    [:short "-v" :arity 0 :description "a flag"])
+
+  (define (error-irritants thunk)
+    (guard (e [(error? e) (condition-irritants e)])
+      (thunk)
+      #f))
+
+  (define-test test-choice-is-accepted-and-returned-as-it-is
+    (let ([option (with-choices '("--format" "json"))])
+      (CHECK equal? (option "--format") "json")
+      (CHECK equal? (option "-f") "json")))
+
+  (define-test test-choice-in-every-argument-form
+    (CHECK equal? ((with-choices '("-f" "text")) "--format") "text")
+    (CHECK equal? ((with-choices '("--format" "yaml")) "-f") "yaml")
+    (CHECK equal? ((with-choices '("--format=json")) "-f") "json")
+    (CHECK equal? ((with-choices '("-f=text")) "-f") "text"))
+
+  (define-test test-integer-choices-give-integers
+    (let ([option (with-choices '("--level" "4"))])
+      (CHECK eqv? (option "--level") 4))
+    (CHECK eqv? ((with-choices '("--level=1")) "--level") 1))
+
+  (define-test test-mixed-choices
+    (CHECK equal? ((with-choices '("--mixed" "auto")) "--mixed") "auto")
+    (CHECK eqv? ((with-choices '("--mixed" "2")) "--mixed") 2))
+
+  (define-test test-negative-integer-choice-needs-the-escape
+    (CHECK eqv? ((with-choices '("--delta" "\\-1")) "--delta") -1)
+    (CHECK eqv? ((with-choices '("--delta" "0")) "--delta") 0))
+
+  (define-test test-every-argument-is-checked
+    (CHECK equal? ((with-choices '("-m" "a" "c" "b")) "--mode") '("a" "c" "b"))
+    (CHECK equal? ((with-choices '("--mode=a,b")) "-m") '("a" "b"))
+    (CHECK equal? (error-message (lambda () (with-choices '("-m" "a" "x"))))
+           "argument must be one of the choices"))
+
+  (define-test test-choices-absent
+    (let ([option (with-choices '())])
+      (CHECK eq? (option "--format") #f)
+      (CHECK eq? (option "--level") #f)
+      (CHECK equal? (option "--mode") '())))
+
+  (define-test test-wrong-choice-message-and-irritants
+    (CHECK equal? (error-message (lambda () (with-choices '("--format" "xml"))))
+           "argument must be one of the choices")
+    (CHECK equal? (error-irritants (lambda () (with-choices '("--format" "xml"))))
+           '("--format" "xml" ("json" "text" "yaml")))
+    (CHECK equal? (error-irritants (lambda () (with-choices '("-f" "xml"))))
+           '("-f" "xml" ("json" "text" "yaml"))))
+
+  (define-test test-wrong-integer-choice
+    (CHECK equal? (error-irritants (lambda () (with-choices '("--level" "3"))))
+           '("--level" "3" (1 2 4)))
+    (CHECK equal? (error-message (lambda () (with-choices '("--level" "abc"))))
+           "argument must be one of the choices"))
+
+  (define-test test-choices-are-exact-and-case-sensitive
+    (CHECK equal? (error-message (lambda () (with-choices '("--format" "JSON"))))
+           "argument must be one of the choices")
+    (CHECK equal? (error-message (lambda () (with-choices '("--format" "jso"))))
+           "argument must be one of the choices")
+    (CHECK equal? (error-message (lambda () (with-choices '("--format" " json"))))
+           "argument must be one of the choices")
+    (CHECK equal? (error-message (lambda () (with-choices '("--level" "04"))))
+           "argument must be one of the choices")
+    (CHECK equal? (error-message (lambda () (with-choices '("--format=")))) 
+           "argument must be one of the choices"))
+
+  (define-test test-a-conversion-error-is-still-a-different-message
+    (CHECK equal? (error-message (lambda () (parse '("-n" "abc")))) "invalid argument value"))
+
+  (define-test test-choices-in-the-usage-text
+    (let ([usage (format-usage
+                  (list (make-option-ast "-f" "--format" 1 1
+                                         (make-choice-converter '("json" "text" "yaml"))
+                                         "output format" #f)
+                        (make-option-ast #f "--level" 1 1
+                                         (make-choice-converter '(1 2 4)) "verbosity level" #f)
+                        (make-option-ast "-m" "--mode" 1 unlimited
+                                         (make-choice-converter '("a" "b" "c")) "mode" #f)
+                        (make-option-ast "-n" "--num" 0 2
+                                         (make-choice-converter '("x" "y")) "number" #f))
+                  "prog")])
+      (CHECK eq? (and (contains? usage "-f, --format {json,text,yaml}  output format") #t) #t)
+      (CHECK eq? (and (contains? usage "    --level {1,2,4}") #t) #t)
+      (CHECK eq? (and (contains? usage "-m, --mode {a,b,c}...") #t) #t)
+      (CHECK eq? (and (contains? usage "-n, --num [{x,y}] [{x,y}]") #t) #t)
+      (CHECK eq? (and (contains? usage "<string>") #t) #f)))
+
+  (define-test test-choices-are-aligned-with-the-other-options
+    (CHECK string=?
+           (format-usage
+            (list (make-option-ast "-f" "--format" 1 1 (make-choice-converter '("json" "text"))
+                                   "output format" #f)
+                  (make-option-ast "-v" "--verbose" 0 0 #f "verbose" #f))
+            "prog")
+           (string-append
+            "Usage: prog [options] [--] [arguments...]\n"
+            "\n"
+            "Options:\n"
+            "  -f, --format {json,text}  output format\n"
+            "  -v, --verbose             verbose\n"
+            "  -h, --help                show this help message and exit\n")))
+
+  (define-test test-choices-show-in-the-help-of-a-parser
+    (when run-capturing-exit
+      (let ([result (run-capturing-exit (lambda () (with-choices '("-h"))))])
+        (CHECK eqv? (car result) 0)
+        (CHECK eq? (and (contains? (cdr result) "-f, --format {json,text,yaml}") #t) #t)
+        (CHECK eq? (and (contains? (cdr result) "--level {1,2,4}") #t) #t)
+        (CHECK eq? (and (contains? (cdr result) "-m, --mode {a,b,c}...") #t) #t)
+        (CHECK eq? (and (contains? (cdr result) "--delta {-1,0,1}") #t) #t))))
+
+  (define-test test-a-flag-next-to-choices-still-works
+    (CHECK eq? ((with-choices '("-v" "--format" "json")) "-v") 'present))
+
+  (define-test test-choices-on-a-flag-is-a-syntax-error
+    (CHECK eq? (syntax-error?
+                '(let ()
+                   (define-command-line-options p [:short "-a" :arity 0 :choices ("x")])
+                   p))
+           #t))
+
+  (define-test test-choices-and-type-together-is-a-syntax-error
+    (CHECK eq? (syntax-error?
+                '(let ()
+                   (define-command-line-options p [:short "-a" :type int :choices (1 2)])
+                   p))
+           #t)
+    (CHECK eq? (syntax-error?
+                '(let ()
+                   (define-command-line-options p [:short "-a" :choices (1 2) :type int])
+                   p))
+           #t))
+
+  (define-test test-bad-choices-are-syntax-errors
+    (for-each
+     (lambda (form)
+       (CHECK eq? (syntax-error? form) #t))
+     '((let () (define-command-line-options p [:short "-a" :choices ()]) p)
+       (let () (define-command-line-options p [:short "-a" :choices ("x" "x")]) p)
+       (let () (define-command-line-options p [:short "-a" :choices "x"]) p)
+       (let () (define-command-line-options p [:short "-a" :choices (x)]) p)
+       (let () (define-command-line-options p [:short "-a" :choices (1.5)]) p)
+       (let () (define-command-line-options p [:short "-a" :choices (1.0)]) p))))
+
+  (define-test test-choice-keyword-is-exported
+    (CHECK eq?
+           (guard (e [else #f])
+             (environment '(only (rime command-line-options) :choices))
+             #t)
+           #t))
+
+  ;; ========================================
   ;; keywords
   ;; ========================================
 

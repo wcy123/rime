@@ -127,7 +127,7 @@
     (when (> (option-ast-min option) (option-ast-max option))
       (report "arity min must not exceed max" option))
     (when (and (flag? option) (option-ast-converter option))
-      (report ":type must not be given when arity is 0" option)))
+      (report ":type and :choices must not be given when arity is 0" option)))
 
   ;; names must be unique across all options and must not use the built-in help names
   (define (check-names options report)

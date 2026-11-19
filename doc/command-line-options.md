@@ -42,9 +42,10 @@ the list of command line arguments (without the program name).
 | `:long "--long-name"`| long name                                                  | none       |
 | `:arity <arity>`     | how many arguments the option takes                        | `1`        |
 | `:type <type>`       | how to convert each argument, not allowed with arity `0`   | `string`   |
+| `:choices (...)`     | the arguments must be one of these, see [Choices](#choices) | none       |
 | `:description "..."` | text shown by `--help`                                     | empty      |
 
-The keywords `:short :long :arity :type :description` are exported by the library, so import it whole
+The keywords `:short :long :arity :type :choices :description` are exported by the library, so import it whole
 (`(import (rime command-line-options))`); `(only (rime command-line-options) define-command-line-options)`
 would leave them unbound and the clauses would be rejected.
 
@@ -108,6 +109,44 @@ to read `-b` or `--long-name` as symbols. Strings work everywhere, use them in p
 
 A conversion failure, including an exception raised by your own procedure,
 is reported as `invalid argument value`.
+
+## Choices
+
+`:choices` makes an option accept only a few values. It is another way to say how an argument is read,
+so it takes the place of `:type`: giving both is a syntax error, and so is giving `:choices` to a flag.
+
+```scheme
+(define-command-line-options parse
+  [:short "-f" :long "--format" :choices ("json" "text" "yaml") :description "output format"]
+  [:long "--level" :choices (1 2 4) :description "verbosity level"]
+  [:short "-m" :long "--mode" :arity (1 +) :choices ("a" "b" "c") :description "modes"])
+```
+
+* A choice is a string or an exact integer, and there is at least one. The value you get is the choice
+  itself: `"yaml"`, or the integer `4` (no `:type int` needed). Strings and integers can be mixed.
+* An argument has to match exactly, with the same case. An integer matches its usual text, so `4`
+  matches `"4"` but not `"04"`; a negative one has to be escaped, `--delta '\-1'`.
+* Two choices with the same text are an error (`"1"` and `1`), since the second could never be chosen.
+* Every argument of an option with several arguments is checked, `-m a c`.
+* A wrong value raises `argument must be one of the choices` (see [Errors](#errors)).
+* The usage shows the choices in place of the type:
+
+```
+$ prog -h
+Usage: prog [options] [--] [arguments...]
+
+Options:
+  -f, --format {json,text,yaml}  output format
+      --level {1,2,4}            verbosity level
+  -m, --mode {a,b,c}...          modes
+  -h, --help                     show this help message and exit
+
+$ prog -f yaml --level 4 -m a c
+("yaml" 4 ("a" "c"))
+
+$ prog --format xml
+Exception in opt-parser: argument must be one of the choices with irritants ("--format" "xml" ("json" "text" "yaml"))
+```
 
 # Reading the result
 
@@ -217,6 +256,7 @@ Catch it with `guard`; the library never exits by itself except for `-h`.
 | `too many arguments for option`    | `--name=a,b,c` with more than `max` items             | the option name        |
 | `option does not take arguments`   | `--flag=1` on an arity 0 option                       | the option name        |
 | `invalid argument value`           | the conversion failed                                 | the option name, the text |
+| `argument must be one of the choices` | the argument is not one of the `:choices`          | the option name, the text, the choices |
 
 ```scheme
 (guard (e [(error? e) (display (condition-message e)) (newline) (exit 2)])
@@ -327,7 +367,7 @@ The exported macro is just those two calls.
 | `__parse.sls`                       | phase 1, read: walks the clauses and fields by pattern matching, builds records |
 | `__ast.sls`                         | the `option-ast` record, and the semantic rules (names, arity, converter, duplicates) |
 | `__codegen.sls`                     | phase 2, write: generates the definition, which builds the same records again at runtime; never reads user syntax |
-| `__keywords.sls`                    | the field keywords `:short :long :arity :type :description`                  |
+| `__keywords.sls`                    | the field keywords `:short :long :arity :type :choices :description`         |
 | `__runtime.sls`                      | the runtime: parses the command line, builds the accessor, prints the usage; the builtin converters |
 
 Adding a builtin type means a converter and one entry in `builtin-converters`, both in `__runtime.sls`.
