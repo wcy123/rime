@@ -315,14 +315,60 @@
       (CHECK eqv? (option "x") 0.5)))
 
   ;; ========================================
-  ;; repeated option
+  ;; repeated option: an option with an upper limit keeps its last occurrence, one without adds up
   ;; ========================================
 
-  (define-test test-repeated-option-last-wins
-    (let ([option (parse '("-n" "1" "-n" "2"))])
-      (CHECK eqv? (option "n") 2))
-    (let ([option (parse '("-f" "a" "-f" "b" "c"))])
-      (CHECK equal? (option "f") '("b" "c"))))
+  (define-test test-repeated-option-with-one-argument-last-wins
+    (CHECK eqv? ((parse '("-n" "1" "-n" "2")) "n") 2)
+    (CHECK equal? ((parse '("-s" "a" "--name" "b")) "s") "b"))
+
+  (define-test test-repeated-option-with-a-fixed-arity-last-wins
+    (CHECK equal? ((parse '("-p" "1" "2" "-p" "3" "4")) "pair") '(3 4)))
+
+  (define-test test-repeated-option-with-a-bounded-arity-last-wins
+    (CHECK equal? ((parse '("-r" "1" "2" "-r" "3")) "range") '(3)))
+
+  (define-test test-repeated-option-without-an-upper-limit-adds-up
+    (CHECK equal? ((parse '("-f" "a" "-f" "b")) "files") '("a" "b"))
+    (CHECK equal? ((parse '("-f" "a" "b" "-f" "c")) "files") '("a" "b" "c"))
+    (CHECK equal? ((parse '("--files=a" "--files=b" "-f=c")) "files") '("a" "b" "c"))
+    (CHECK equal? ((parse '("-f" "a" "-v" "--files" "b")) "files") '("a" "b")))
+
+  (define-test test-repeated-zero-or-more-option-adds-up
+    (CHECK equal? ((parse '("-o" "a" "-o" "b")) "opt-list") '("a" "b"))
+    (CHECK equal? ((parse '("-o" "-o" "a")) "opt-list") '("a"))
+    (CHECK equal? ((parse '("-o" "-o")) "opt-list") '()))
+
+  (define-command-line-options parse-numbers
+    [:short "-n" :long "--num" :arity (1 +) :type int]
+    [:long "--level" :arity (1 +) :choices (1 2 4)]
+    [:positional "rest" :arity (0 +)])
+
+  (define-test test-every-repeated-value-is-converted-and-checked
+    (CHECK equal? ((parse-numbers '("-n" "1" "-n" "2" "3")) "num") '(1 2 3))
+    (CHECK equal? (error-message (lambda () (parse-numbers '("-n" "1" "-n" "x")))) "invalid argument value")
+    (CHECK equal? ((parse-numbers '("--level" "1" "--level" "4")) "level") '(1 4))
+    (CHECK equal? (error-message (lambda () (parse-numbers '("--level" "1" "--level" "3"))))
+           "argument must be one of the choices"))
+
+  (define-test test-a-default-is-used-only-when-the-option-was-not-given
+    (CHECK equal? ((parse '()) "files" '("d")) '("d"))
+    (CHECK equal? ((parse '("-f" "a" "-f" "b")) "files" '("d")) '("a" "b")))
+
+  (define-test test-the-last-repeated-option-takes-the-words-after-it
+    ;; an option without an upper limit takes every ordinary word that follows, the last one included
+    (let ([option (parse '("-f" "a" "-f" "b" "file.c"))])
+      (CHECK equal? (option "files") '("a" "b" "file.c"))
+      (CHECK equal? (option "args") '()))
+    (let ([option (parse '("-f" "a" "-f" "b" "--" "file.c"))])
+      (CHECK equal? (option "files") '("a" "b"))
+      (CHECK equal? (option "args") '("file.c")))
+    (let ([option (parse '("-f" "a" "-f=b" "file.c"))])
+      (CHECK equal? (option "files") '("a" "b"))
+      (CHECK equal? (option "args") '("file.c"))))
+
+  (define-test test-a-flag-repeated-stays-true
+    (CHECK eq? ((parse '("-v" "-v" "--verbose")) "v") #t))
 
   ;; ========================================
   ;; escape with backslash
