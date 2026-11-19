@@ -1822,4 +1822,83 @@
 
   (define-test test-usage-without-a-positional-has-no-arguments-section
     (CHECK eq? (contains? (format-usage '() "p") "Arguments:") #f)
-    (CHECK eq? (contains? (format-usage '() "p") "[--]") #f)))
+    (CHECK eq? (contains? (format-usage '() "p") "[--]") #f))
+  ;; ========================================
+  ;; more definition errors of :positional
+  ;; ========================================
+
+  ;; every definition in `bodies` is a syntax error; the bodies are the clauses after the parser name
+  (define (all-syntax-errors? . bodies)
+    (for-all (lambda (body)
+               (syntax-error? `(let () (define-command-line-options p ,@body) p)))
+             bodies))
+
+  (define-test test-syntax-error-two-positional-clauses-whatever-the-arity
+    (CHECK eq? (all-syntax-errors?
+                '([:positional "a" :arity (1 +)] [:positional "b" :arity (1 +)])
+                '([:positional "a" :arity (0 +)] [:positional "b"])
+                '([:positional "a"] [:positional "b" :arity (2 +)])
+                '([:positional "a" :arity (0 1)] [:positional "b" :arity (0 1)])
+                '([:positional "a" :arity 2] [:positional "b" :arity 3])
+                '([:positional "a"] [:short "-v" :arity 0] [:positional "b"]))
+           #t))
+
+  (define-test test-syntax-error-positional-arity
+    (CHECK eq? (all-syntax-errors?
+                '([:positional "a" :arity (3 2)])
+                '([:positional "a" :arity -1])
+                '([:positional "a" :arity (1 2 3)])
+                '([:positional "a" :arity many])
+                '([:positional "a" :arity (0 0)])
+                '([:positional "a" :arity])
+                '([:positional "a" :arity 1 :arity 2]))
+           #t))
+
+  (define-test test-syntax-error-positional-name
+    (CHECK eq? (all-syntax-errors?
+                '([:positional ""])
+                '([:positional "a b"])
+                '([:positional "a=b"])
+                '([:positional "a,b"])
+                '([:positional "--a"])
+                '([:positional 42])
+                '([:positional]))
+           #t))
+
+  (define-test test-syntax-error-positional-converter
+    (CHECK eq? (all-syntax-errors?
+                '([:positional "a" :choices ()])
+                '([:positional "a" :choices ("x" "x")])
+                '([:positional "a" :choices "x"])
+                '([:positional "a" :type int :choices ("x")])
+                '([:positional "a" :choices ("x") :type int]))
+           #t))
+
+  (define-test test-syntax-error-positional-other-fields
+    (CHECK eq? (all-syntax-errors?
+                '([:positional "a" :description 42])
+                '([:positional "a" :description "x" :description "y"])
+                '([:positional "a" :colour red])
+                '([:positional "a" :description]))
+           #t))
+
+  (define-test test-syntax-error-positional-clashes-with-either-name-of-an-option
+    (CHECK eq? (all-syntax-errors?
+                '([:short "-emit" :long "--emit"] [:positional "emit"])
+                '([:positional "emit"] [:short "-emit" :long "--emit"])
+                '([:long "--file"] [:positional "file"])
+                '([:positional "h"])
+                '([:positional "help"]))
+           #t))
+
+  (define-test test-a-positional-next-to-options-is-fine
+    (CHECK eq? (any-syntax-error?
+                '([:short "-v" :arity 0] [:positional "file" :arity (1 +)])
+                '([:positional "file" :arity (0 1)] [:short "-v" :arity 0])
+                '([:positional "emit"] [:short "-e" :long "--exit"]))
+           #f))
+
+  (define (any-syntax-error? . bodies)
+    (exists (lambda (body)
+              (syntax-error? `(let () (define-command-line-options p ,@body) p)))
+            bodies)))

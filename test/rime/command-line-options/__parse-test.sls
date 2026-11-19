@@ -443,4 +443,19 @@
 
   (define-test test-positional-with-arity-0-is-a-violation
     (CHECK eq? (positional-fails? '(:positional "a") '(:arity 0)) #t))
-)
+
+  (define-test test-two-positional-clauses-are-a-violation-whatever-the-arity
+    (for-each
+     (lambda (arities)
+       (CHECK eq? (raises-syntax-violation?
+                   (lambda ()
+                     (options-of (clauses `(:positional "a" :arity ,(car arities))
+                                          `(:positional "b" :arity ,(cadr arities))))))
+              #t))
+     '(((1 +) (1 +)) ((0 +) (1)) (1 (2 +)) ((0 1) (0 1)) (2 3))))
+
+  (define-test test-one-positional-clause-with-any-arity-is-fine
+    (for-each
+     (lambda (arity)
+       (CHECK eq? (positional-ast? (positional-of (clauses `(:positional "a" :arity ,arity)))) #t))
+     '(1 2 (0 1) (1 +) (0 +) (2 5)))))
