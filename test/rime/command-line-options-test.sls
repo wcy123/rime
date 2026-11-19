@@ -1858,6 +1858,119 @@
                    p))
            #t))
   ;; ========================================
+  ;; :default, the value of an option that is not given
+  ;; ========================================
+
+  (define-command-line-options parse-default
+    [:short "-n" :long "--count" :type int :default "3" :description "repeat count"]
+    [:long "--format" :choices ("json" "text") :default "text"]
+    [:short "-e" :long "--exclude" :arity (1 +) :default ("*.tmp" "*.bak")]
+    [:long "--tags" :arity (0 +) :default ()]
+    [:short "-r" :long "--ratio" :type float :default 2]
+    [:short "-c" :long "--color" :type bool :default "yes"]
+    [:short "-u" :long "--upper" :type (lambda (s) (string-upcase s)) :default "a"]
+    [:short "-p" :long "--pair" :arity 2 :type int :default (1 2)]
+    [:long "--level" :choices (1 2 4) :default 2]
+    [:long "--dash" :default "-x"]
+    [:long "--empty" :default ""]
+    [:long "--other"])
+
+  (define-test test-default-is-the-value-of-an-absent-option
+    (let ([option (parse-default '())])
+      (CHECK eqv? (option "count") 3)
+      (CHECK equal? (option "format") "text")
+      (CHECK equal? (option "exclude") '("*.tmp" "*.bak"))
+      (CHECK equal? (option "tags") '())
+      (CHECK eqv? (option "ratio") 2.0)
+      (CHECK eq? (option "color") #t)
+      (CHECK equal? (option "upper") "A")
+      (CHECK equal? (option "pair") '(1 2))
+      (CHECK eqv? (option "level") 2)
+      (CHECK equal? (option "empty") "")))
+
+  (define-test test-default-is-found-by-both-names
+    (let ([option (parse-default '())])
+      (CHECK eqv? (option "n") 3)
+      (CHECK eqv? (option "count") 3)
+      (CHECK equal? (option 'e) '("*.tmp" "*.bak"))))
+
+  (define-test test-an-option-without-a-default-is-as-before
+    (CHECK eq? ((parse-default '()) "other") #f))
+
+  (define-test test-given-option-replaces-the-default
+    (let ([option (parse-default '("-n" "5" "--format=json" "-e" "x"))])
+      (CHECK eqv? (option "count") 5)
+      (CHECK equal? (option "format") "json")
+      (CHECK equal? (option "exclude") '("x"))
+      (CHECK eqv? (option "ratio") 2.0)))
+
+  (define-test test-given-list-option-is-not-added-to-the-default
+    (CHECK equal? ((parse-default '("--exclude=x,y")) "exclude") '("x" "y"))
+    (CHECK equal? ((parse-default '("--tags" "t")) "tags") '("t"))
+    (CHECK equal? ((parse-default '("--tags")) "tags") '()))
+
+  (define-test test-given-twice-keeps-the-last-and-ignores-the-default
+    (CHECK eqv? ((parse-default '("-n" "1" "-n" "2")) "count") 2))
+
+  (define-test test-default-is-not-a-command-line-word
+    ;; no escape is read in it: a default that looks like an option is just text
+    (CHECK equal? ((parse-default '()) "dash") "-x"))
+
+  (define-test test-default-is-converted-by-the-type-of-the-option
+    (CHECK eqv? ((parse-default '()) "count") 3)
+    (CHECK eqv? ((parse-default '()) "level") 2)
+    (CHECK equal? ((parse-default '()) "upper") "A"))
+
+  (define-test test-default-is-taken-with-positional-words
+    (let ([option (parse-mode '("fast"))])
+      (CHECK equal? (option "mode") "fast"))
+    (CHECK eqv? ((parse-default-and-word '("w")) "count") 3)
+    (CHECK equal? ((parse-default-and-word '("w")) "word") "w"))
+
+  (define-command-line-options parse-default-and-word
+    [:short "-n" :long "--count" :type int :default "3"]
+    [:positional "word"])
+
+  (define-command-line-options parse-default-usage
+    [:short "-n" :long "--count" :type int :default "3" :description "repeat count"]
+    [:long "--format" :choices ("json" "text") :default "text"]
+    [:short "-e" :arity (1 +) :default ("a" "b") :description "first line\nsecond line"]
+    [:short "-q" :long "--quiet" :arity (0 +) :default () :description "no default shown"])
+
+  (define-test test-usage-shows-the-default
+    (CHECK equal? ((parse-default-usage '()) 'help)
+           (string-append
+            "Usage: " (program-name) " [options]\n"
+            "\n"
+            "Options:\n"
+            "  -n, --count <int>" (spaces 9) "repeat count (default: 3)\n"
+            "      --format {json,text}  (default: text)\n"
+            "  -e <string>..." (spaces 12) "first line (default: a, b)\n"
+            (spaces 28) "second line\n"
+            "  -q, --quiet [<string>...]  no default shown\n"
+            "  -h, --help" (spaces 18) "show this help message and exit\n")))
+
+  (define-test test-an-invalid-default-of-a-custom-type-is-reported-when-parsing
+    (let ([parse-bad (eval '(let ()
+                              (define-command-line-options p
+                                [:short "-k" :type (lambda (s) (if (string=? s "ok") s (raise 'bad)))
+                                 :default "no"])
+                              p)
+                           definition-environment)])
+      (CHECK equal? (error-message (lambda () (parse-bad '()))) "invalid argument value")
+      (CHECK equal? (error-irritants (lambda () (parse-bad '()))) '("-k" "no"))
+      (CHECK equal? ((parse-bad '("-k" "ok")) "k") "ok")))
+
+  (define-test test-help-does-not-convert-the-defaults
+    (let ([shown #f]
+          [spec (option-ast-with-default
+                 (make-option-ast "-k" #f 1 1
+                                  (procedure->converter (lambda (s) (raise 'bad))) "" #f #f)
+                 '("no"))])
+      (parse-command-line (list spec) '("--help") (lambda (text) (set! shown text)))
+      (CHECK eq? (and shown #t) #t)))
+
+  ;; ========================================
   ;; names without the dashes
   ;; ========================================
 
@@ -2718,6 +2831,51 @@
        (#f [:short "-a" :required])
        (#f [:required :long "--abc"])
        (#f [:short "-a" :arity (0 +) :required]))))
+
+  (define-test test-definition-errors-of-default
+    (check-definition-rows
+     '((":default is not allowed for a flag" [:short "-a" :arity 0 :default "x"])
+       (":default is not allowed for a flag" [:short "-a" :arity (0 0) :default "x"])
+       (":default and :required cannot be given together" [:short "-a" :required :default "x"])
+       (":default and :required cannot be given together" [:short "-a" :default "x" :required])
+       (":default does not fit the arity" [:short "-a" :default ("x" "y")])
+       (":default does not fit the arity" [:short "-a" :default ()])
+       (":default does not fit the arity" [:short "-a" :arity (2 3) :default ("x")])
+       (":default does not fit the arity" [:short "-a" :arity 2 :default ("x" "y" "z")])
+       (":default does not fit the arity" [:short "-a" :arity 2 :default "x"])
+       (":default does not fit the arity" [:short "-a" :arity (1 +) :default ()])
+       (":default must be a string, an integer, or a list of them" [:short "-a" :default 3.5])
+       (":default must be a string, an integer, or a list of them" [:short "-a" :default x])
+       (":default must be a string, an integer, or a list of them" [:short "-a" :arity (1 +) :default (x)])
+       (":default must be a string, an integer, or a list of them" [:short "-a" :default #t])
+       ("duplicate field" [:short "-a" :default "x" :default "y"])
+       ("unknown field, or field without a value" [:short "-a" :default])
+       (":default is not a valid value for :type" [:short "-a" :type int :default "x"])
+       (":default is not a valid value for :type" [:short "-a" :type int :default "3.5"])
+       (":default is not a valid value for :type" [:short "-a" :type float :default "x"])
+       (":default is not a valid value for :type" [:short "-a" :type bool :default "maybe"])
+       (":default is not a valid value for :type" [:short "-a" :arity 2 :type int :default (1 "x")])
+       (":default is not a valid value for :type" [:short "-a" :default "x" :type int])
+       (":default must be one of the :choices" [:short "-a" :choices ("x" "y") :default "z"])
+       (":default must be one of the :choices" [:short "-a" :arity (1 +) :choices ("x" "y") :default ("x" "z")])
+       (":default must be one of the :choices" [:short "-a" :choices (1 2) :default 3])
+       (":default is a field of an option, not of a :positional clause" [:positional "a" :default "x"])
+       (#f [:short "-a" :default "x"])
+       (#f [:short "-a" :type int :default 3])
+       (#f [:short "-a" :type int :default "3"])
+       (#f [:short "-a" :default "3" :type int])
+       (#f [:default "x" :short "-a"])
+       (#f [:short "-a" :type string :default ""])
+       (#f [:short "-a" :arity (0 +) :default ()])
+       (#f [:short "-a" :arity (0 1) :default ()])
+       (#f [:short "-a" :arity (1 +) :default ("a" "b" "c")])
+       (#f [:short "-a" :arity 2 :type int :default (1 2)])
+       (#f [:short "-a" :choices (1 2) :default 2])
+       (#f [:short "-a" :choices ("a" "b") :default "b"])
+       (#f [:short "-a" :type bool :default "yes"])
+       (#f [:short "-a" :type float :default 2])
+       (#f [:short "-a" :type (lambda (s) s) :default "anything"])
+       (#f [:short "-a" :type string-upcase :default "anything"]))))
 
   (define-test test-definition-errors-of-the-clause-grammar
     (check-definition-rows
