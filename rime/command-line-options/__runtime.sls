@@ -203,7 +203,7 @@
   ;; the value is the program's own, it is not converted or checked. An option that was given with
   ;; no arguments, -o alone, was given, and a positional that got no words was not.
   (define (make-accessor specs positionals table)
-    ;; default is '() when the program gave none, and a list of the one default value when it did
+    ;; default is `unbound` when the program gave none; any other value is its default, even #f
     (define (lookup key default)
       (if (or (string? key) (symbol? key))
           (let ([name (if (symbol? key) (symbol->string key) key)])
@@ -212,20 +212,20 @@
               (format-usage specs (program-name) positionals)]
              [(find-spec-by-name specs name)
               => (lambda (spec)
-                   (if (and (pair? default) (not (hashtable-contains? table spec)))
-                       (car default)
+                   (if (and (not (unbound? default)) (not (hashtable-contains? table spec)))
+                       default
                        (value-of (option-ast-min spec) (option-ast-max spec) (hashtable-ref table spec #f))))]
              [(find-positional positionals name)
               => (lambda (positional)
-                   (if (and (pair? default) (null? (hashtable-ref table positional '())))
-                       (car default)
+                   (if (and (not (unbound? default)) (null? (hashtable-ref table positional '())))
+                       default
                        (value-of (positional-ast-min positional) (positional-ast-max positional)
                                  (hashtable-ref table positional #f))))]
              [else (accessor-fail "unknown option" key (unknown-name-hint specs positionals name))]))
           (accessor-fail "invalid option key" key)))
     (case-lambda
-      [(key) (lookup key '())]
-      [(key default) (lookup key (list default))]))
+      [(key) (lookup key unbound)]
+      [(key default) (lookup key default)]))
 
   ;; (unknown-name-hint specs positionals name) => the hint that the error carries after the name
   ;;   input   specs and positionals: what the parser defines; name: the name the program asked for
