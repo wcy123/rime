@@ -193,15 +193,23 @@ prog --exclude=a,b,c          ; several arguments with =, separated by commas
 
 ## Positional arguments
 
-The first word that is not an option, and is not consumed as an argument of an option, starts the
-positional arguments. Everything after that word is positional, even if it looks like an option.
-`--` ends option parsing explicitly, everything after it is positional and kept as is.
+Options and positional words can come in any order. A word that is an option is an option wherever it
+is, and a word that is not (and is not consumed as an argument of an option) is positional.
+The positional words keep their order.
+`--` ends option parsing explicitly, everything after it is positional and kept as is, and
+the `--` itself is dropped.
 
 ```
 prog -v in.txt out.txt        ; positional: "in.txt" "out.txt"
+prog in.txt -v out.txt        ; positional: "in.txt" "out.txt", -v is present
 prog -v -- -x                 ; positional: "-x"
-prog in.txt -v                ; positional: "in.txt" "-v"   (-v is NOT the flag here)
+prog in.txt -- -v             ; positional: "in.txt" "-v"   (-v is NOT the flag here)
 ```
+
+An option with arity `(min max)` takes the following ordinary words until it has `max` of them, or the
+next word is an option or `--`. With arity `(1 +)`, `prog a -e x y b` gives `-e` the words `"x" "y" "b"`
+and the positional word `"a"`; write `prog a -e x y -- b` to keep `b` positional.
+An option given twice keeps its last occurrence.
 
 ## Arguments starting with `-`
 
@@ -315,6 +323,16 @@ $ grep-lite -v --count 3 -r 0.25 -c yes -e a b c -w 2 -t x in.txt out.txt
 "-e" => ("a" "b" "c")
 "-w" => (2)
 "-t" => "<x>"
+positionals: ("in.txt" "out.txt")
+
+$ grep-lite in.txt -v -n 3 out.txt
+"-v" => present
+"-n" => 3
+"-r" => #f
+"-c" => #f
+"-e" => ()
+"-w" => ()
+"-t" => #f
 positionals: ("in.txt" "out.txt")
 
 $ grep-lite --count=3 --exclude=a,b,c --window=1,2 -- -v file

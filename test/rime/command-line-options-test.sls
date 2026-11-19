@@ -318,12 +318,12 @@
       (CHECK eqv? (option 'number-of-positional-argument) 2)
       (CHECK equal? (option 0) "--")))
 
-  (define-test test-everything-after-first-positional-is-positional
+  (define-test test-options-after-the-first-positional-are-options
     (let ([option (parse '("a" "-v" "--count" "5"))])
-      (CHECK eq? (option "-v") 'absent)
-      (CHECK eq? (option "-n") #f)
-      (CHECK eqv? (option 'number-of-positional-argument) 4)
-      (CHECK equal? (option 1) "-v")))
+      (CHECK eq? (option "-v") 'present)
+      (CHECK eqv? (option "-n") 5)
+      (CHECK eqv? (option 'number-of-positional-argument) 1)
+      (CHECK equal? (option 0) "a")))
 
   (define-test test-positional-index-out-of-range
     (let ([option (parse '("a"))])
@@ -1097,12 +1097,11 @@
       (CHECK eq? shown #f)
       (CHECK equal? (option 0) "-h")))
 
-  (define-test test-help-after-positional-is-positional
-    (let* ([shown #f]
-           [option (parse-command-line usage-specs '("a" "--help")
-                                       (lambda (text) (set! shown text)))])
-      (CHECK eq? shown #f)
-      (CHECK equal? (option 1) "--help")))
+  (define-test test-help-after-positional-shows-the-usage
+    (let ([shown #f])
+      (parse-command-line usage-specs '("a" "--help")
+                          (lambda (text) (set! shown text)))
+      (CHECK eq? (and shown #t) #t)))
 
   (define-test test-help-as-option-argument-is-escapable
     (let* ([shown #f]
@@ -1319,4 +1318,79 @@
     (CHECK eq? (convert-bool "off") #f))
 
   (define-test test-convert-string-direct
-    (CHECK equal? (convert-string "x y") "x y")))
+    (CHECK equal? (convert-string "x y") "x y"))
+
+  ;; ========================================
+  ;; options and positional words in any order
+  ;; ========================================
+
+  (define-command-line-options parse-mixed
+    [:short "-emit" :long "--emit" :description "action"]
+    [:short "-opt" :long "--opt" :arity 0 :description "run the optimizer"]
+    [:short "-x" :long "--x" :description "kind of input"]
+    [:short "-v" :arity 0 :description "verbose"]
+    [:short "-e" :arity (1 +) :description "words"])
+
+  (define (positionals option)
+    (let loop ([i (- (option 'number-of-positional-argument) 1)] [acc '()])
+      (if (< i 0) acc (loop (- i 1) (cons (option i) acc)))))
+
+  ;; (emit opt x positional) of the command line
+  (define (mixed args)
+    (let ([option (parse-mixed args)])
+      (list (option "-emit") (option "-opt") (option "-x") (positionals option))))
+
+  (define-test test-mixed-option-before-positional
+    (CHECK equal? (mixed '("--emit=ast" "example.toy")) '("ast" absent #f ("example.toy"))))
+
+  (define-test test-mixed-option-after-positional
+    (CHECK equal? (mixed '("example.toy" "--emit=ast")) '("ast" absent #f ("example.toy"))))
+
+  (define-test test-mixed-lone-dash-is-positional
+    (CHECK equal? (mixed '("-" "--emit=ast")) '("ast" absent #f ("-"))))
+
+  (define-test test-mixed-option-argument-after-positional
+    (CHECK equal? (mixed '("example.toy" "-emit" "ast")) '("ast" absent #f ("example.toy"))))
+
+  (define-test test-mixed-flag-after-positional
+    (CHECK equal? (mixed '("example.toy" "-emit=mlir" "-opt")) '("mlir" present #f ("example.toy"))))
+
+  (define-test test-mixed-option-before-and-after-positional
+    (CHECK equal? (mixed '("-x" "mlir" "driver-input.txt" "-emit=mlir"))
+           '("mlir" absent "mlir" ("driver-input.txt")))
+    (CHECK equal? (mixed '("driver-input.txt" "-x" "mlir" "-emit=mlir"))
+           '("mlir" absent "mlir" ("driver-input.txt"))))
+
+  (define-test test-mixed-positional-only
+    (CHECK equal? (mixed '("example.toy")) '(#f absent #f ("example.toy"))))
+
+  (define-test test-mixed-double-dash-ends-options
+    (CHECK equal? (mixed '("example.toy" "--" "--emit=ast")) '(#f absent #f ("example.toy" "--emit=ast")))
+    (CHECK equal? (mixed '("-opt" "--" "-x")) '(#f present #f ("-x")))
+    (CHECK equal? (mixed '("a" "--" "b" "-opt")) '(#f absent #f ("a" "b" "-opt"))))
+
+  (define-test test-mixed-positional-order-is-kept
+    (let ([option (parse-mixed '("a" "-v" "b" "-v" "c"))])
+      (CHECK eq? (option "-v") 'present)
+      (CHECK equal? (positionals option) '("a" "b" "c"))
+      (CHECK eqv? (option 'number-of-positional-argument) 3)))
+
+  (define-test test-mixed-escaped-word-is-positional
+    (CHECK equal? (positionals (parse-mixed '("a" "\\-x" "b"))) '("a" "-x" "b")))
+
+  (define-test test-mixed-option-with-unlimited-arity-takes-ordinary-words
+    (let ([option (parse-mixed '("a" "-e" "x" "y" "b"))])
+      (CHECK equal? (option "-e") '("x" "y" "b"))
+      (CHECK equal? (positionals option) '("a"))))
+
+  (define-test test-mixed-unlimited-arity-stops-at-an-option
+    (let ([option (parse-mixed '("-e" "x" "y" "-v" "b"))])
+      (CHECK equal? (option "-e") '("x" "y"))
+      (CHECK eq? (option "-v") 'present)
+      (CHECK equal? (positionals option) '("b"))))
+
+  (define-test test-mixed-last-occurrence-wins
+    (CHECK equal? (mixed '("-emit=a" "f" "-emit=b")) '("b" absent #f ("f"))))
+
+  (define-test test-mixed-unknown-option-after-positional
+    (CHECK equal? (error-message (lambda () (parse-mixed '("f" "--nope")))) "unknown option")))

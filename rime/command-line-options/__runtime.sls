@@ -34,7 +34,7 @@
       [(specs args on-help)
        (let ([table (make-eq-hashtable)])   ; option -> the converted arguments
 
-         ;; returns the positional arguments
+         ;; returns the positional arguments; options and positional words may come in any order
          (define (scan tokens)
            (cond
             [(null? tokens) '()]
@@ -44,7 +44,7 @@
              '()]
             [(option-like? (car tokens))
              (scan (parse-option (car tokens) (cdr tokens)))]
-            [else (map unescape tokens)]))
+            [else (cons (unescape (car tokens)) (scan (cdr tokens)))]))
 
          ;; token is "-x", "--long" or "-x=a,b" / "--long=a,b"; returns the unconsumed tokens
          (define (parse-option token rest)
