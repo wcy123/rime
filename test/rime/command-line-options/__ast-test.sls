@@ -37,6 +37,14 @@
   (define twice-message "option name is defined twice")
   (define reserved-message "-h and --help are reserved for the built-in help")
 
+  (define required-flag-message "a flag (arity 0) cannot be :required")
+
+  (define-test test-required-flag-is-a-problem
+    (CHECK equal? (problems (make-option-ast "-a" #f 0 0 #f "" 'a #t))
+           (list (cons required-flag-message 'a)))
+    (CHECK equal? (problems (make-option-ast "-a" #f 0 0 #f "" 'a #f)) '())
+    (CHECK equal? (problems (make-option-ast "-a" #f 0 1 #f "" 'a #t)) '()))
+
   (define-test test-record-fields
     (let ([o (make-option-ast "-n" "--count" 0 2 'int "repeat" 'src)])
       (CHECK equal? (option-ast-short o) "-n")

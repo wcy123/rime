@@ -335,4 +335,26 @@
     (guard (e [(syntax-violation? e)
                (CHECK equal? (syntax->datum (syntax-violation-form e)) '(:short "-a" :arity (3 2)))])
       (parse "-a" '(:arity (3 2)))
-      (assert #f))))
+      (assert #f)))
+  ;; ========================================
+  ;; :required
+  ;; ========================================
+
+  (define-test test-required-is-off-by-default
+    (CHECK equal? (option-ast-required (parse "-a")) #f))
+
+  (define-test test-required-keyword-sets-it
+    (CHECK equal? (option-ast-required (parse "-a" '(:required))) #t)
+    (CHECK equal? (option-ast-required (parse "-a" '(:required) '(:long "--all"))) #t)
+    (CHECK equal? (option-ast-required (parse "-a" '(:long "--all") '(:required))) #t))
+
+  (define-test test-required-given-twice-is-a-violation
+    (CHECK eq? (parse-fails? "-a" '(:required) '(:required)) #t))
+
+  (define-test test-required-takes-no-value
+    (CHECK eq? (parse-fails? "-a" '(:required #t)) #t))
+
+  (define-test test-required-on-a-flag-is-a-violation
+    (CHECK eq? (parse-fails? "-a" '(:arity 0) '(:required)) #t)
+    (CHECK eq? (parse-fails? "-a" '(:arity (0 0)) '(:required)) #t)
+    (CHECK eq? (parse-fails? "-a" '(:arity (0 +)) '(:required)) #f)))

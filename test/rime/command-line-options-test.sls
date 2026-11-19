@@ -1393,4 +1393,96 @@
     (CHECK equal? (mixed '("-emit=a" "f" "-emit=b")) '("b" absent #f ("f"))))
 
   (define-test test-mixed-unknown-option-after-positional
-    (CHECK equal? (error-message (lambda () (parse-mixed '("f" "--nope")))) "unknown option")))
+    (CHECK equal? (error-message (lambda () (parse-mixed '("f" "--nope")))) "unknown option"))
+  ;; ========================================
+  ;; (option 'help), the usage as a string
+  ;; ========================================
+
+  (define-command-line-options parse-small
+    [:short "-v" :long "--verbose" :arity 0 :description "verbose output"])
+
+  (define-test test-help-key-returns-the-usage
+    (CHECK equal? ((parse-small '()) 'help)
+           (string-append "Usage: " (program-name) " [options] [--] [arguments...]\n"
+                          "\n"
+                          "Options:\n"
+                          "  -v, --verbose  verbose output\n"
+                          "  -h, --help     show this help message and exit\n")))
+
+  (define-test test-help-key-is-the-same-text-as-the-help-option
+    (let ([shown #f])
+      (parse-command-line usage-specs '("-h") (lambda (text) (set! shown text)))
+      (CHECK equal? ((parse-command-line usage-specs '()) 'help) shown)))
+
+  (define-test test-help-key-does-not-start-the-help
+    (CHECK eq? (string? ((parse '("-v")) 'help)) #t)
+    (CHECK eq? (contains? ((parse '()) 'help) "--count") #t))
+
+  ;; ========================================
+  ;; :required, it is an error when the option is absent
+  ;; ========================================
+
+  (define-command-line-options parse-required
+    [:short "-i" :long "--input" :required :description "input file"]
+    [:short "-v" :arity 0 :description "verbose"])
+
+  (define-command-line-options parse-required-short
+    [:short "-k" :required])
+
+  (define-command-line-options parse-required-list
+    [:short "-o" :arity (0 +) :required])
+
+  (define-test test-required-given
+    (let ([option (parse-required '("-i" "a"))])
+      (CHECK equal? (option "-i") "a")))
+
+  (define-test test-required-given-after-a-positional-word-in-the-equals-form
+    (let ([option (parse-required '("f" "--input=a"))])
+      (CHECK equal? (option "--input") "a")
+      (CHECK equal? (option 0) "f")))
+
+  (define-test test-required-missing
+    (CHECK equal? (error-message (lambda () (parse-required '()))) "missing required option")
+    (CHECK equal? (error-irritants (lambda () (parse-required '()))) '("--input")))
+
+  (define-test test-required-missing-when-only-others-are-given
+    (CHECK equal? (error-message (lambda () (parse-required '("-v" "file"))))
+           "missing required option"))
+
+  (define-test test-required-missing-names-the-short-name-when-there-is-no-long-name
+    (CHECK equal? (error-irritants (lambda () (parse-required-short '()))) '("-k")))
+
+  (define-test test-required-list-given-with-no-arguments-is-present
+    (CHECK equal? ((parse-required-list '("-o")) "-o") '()))
+
+  (define-test test-required-list-missing
+    (CHECK equal? (error-message (lambda () (parse-required-list '("a"))))
+           "missing required option"))
+
+  (define-test test-required-is-not-checked-when-help-is-asked
+    (let ([shown #f])
+      (parse-command-line (list (make-option-ast "-i" "--input" 1 1 #f "" #f #t))
+                          '("--help")
+                          (lambda (text) (set! shown text)))
+      (CHECK eq? (and shown #t) #t)))
+
+  (define-test test-syntax-error-required-on-a-flag
+    (CHECK eq? (syntax-error?
+                '(let ()
+                   (define-command-line-options p [:short "-a" :arity 0 :required])
+                   p))
+           #t))
+
+  (define-test test-syntax-error-required-twice
+    (CHECK eq? (syntax-error?
+                '(let ()
+                   (define-command-line-options p [:short "-a" :required :required])
+                   p))
+           #t))
+
+  (define-test test-syntax-error-required-takes-no-value
+    (CHECK eq? (syntax-error?
+                '(let ()
+                   (define-command-line-options p [:short "-a" :required #t])
+                   p))
+           #t)))
