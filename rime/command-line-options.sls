@@ -1,7 +1,7 @@
 #!r6rs
 (library (rime command-line-options)
   (export define-command-line-options
-          :short :long :arity :type :description)
+          :short :long :arity :type :choices :description)
   (import (rnrs (6))
           (for (rnrs (6)) expand)
           (for (rime command-line-options __parse) expand)
@@ -10,7 +10,8 @@
 
   ;; (define-command-line-options parser clause ...)
   ;;   clause = [field ...]
-  ;;   field  = :short name | :long name | :arity n | (min max) | (min +) | :type type | :description "text"
+  ;;   field  = :short name | :long name | :arity n | (min max) | (min +) | :type type
+  ;;          | :choices (literal ...) | :description "text"
   ;;   name   = "-x" or -x, "--long" or --long; a clause needs a :short or a :long
   ;; defines (parser arguments) => accessor procedure
   ;;

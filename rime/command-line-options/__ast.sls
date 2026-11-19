@@ -31,8 +31,8 @@
   ;; min         non-negative integer, the least number of arguments
   ;; max         non-negative integer, the most number of arguments, `unlimited` when there is no limit
   ;; converter   how to turn the text of an argument into a value, #f when none was given:
-  ;;               the expression of a converter procedure, builtin or custom; opaque here,
-  ;;               never inspected
+  ;;               an expression whose value is a converter object (see __runtime.sls) at compile
+  ;;               time, the converter object itself at runtime; opaque here, never inspected
   ;; description string
   ;; source      opaque, where the option came from; only handed back to `report` below, #f at runtime
   ;;
@@ -127,7 +127,7 @@
     (when (> (option-ast-min option) (option-ast-max option))
       (report "arity min must not exceed max" option))
     (when (and (flag? option) (option-ast-converter option))
-      (report ":type must not be given when arity is 0" option)))
+      (report ":type and :choices must not be given when arity is 0" option)))
 
   ;; names must be unique across all options and must not use the built-in help names
   (define (check-names options report)

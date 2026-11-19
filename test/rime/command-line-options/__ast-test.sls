@@ -33,7 +33,7 @@
   (define no-name-message "an option needs a :short or a :long name")
   (define long-message ":long name must look like \"--name\"")
   (define arity-message "arity min must not exceed max")
-  (define flag-message ":type must not be given when arity is 0")
+  (define flag-message ":type and :choices must not be given when arity is 0")
   (define twice-message "option name is defined twice")
   (define reserved-message "-h and --help are reserved for the built-in help")
 

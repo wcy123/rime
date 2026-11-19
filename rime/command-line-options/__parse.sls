@@ -10,7 +10,8 @@
   (import (rnrs (6))
           (rime command-line-options __keywords)
           (rime command-line-options __ast)
-          (only (rime command-line-options __runtime) builtin-converters builtin-converter))
+          (only (rime command-line-options __runtime)
+                builtin-converters builtin-converter make-choice-converter procedure->converter))
 
   ;; (parse-options clauses) => list of option-ast
   ;;   input   clauses: the syntax of `clause ...` in (define-command-line-options parser clause ...),
@@ -22,10 +23,10 @@
   ;;                     [:long "--count" :type int]
   ;;                     [:short "-f" :long "--files" :arity (1 +) :type (lambda (s) s)]))
   ;;
-  ;;   => short  long      min  max        converter                 description
-  ;;      "-v"   #f        0    0          #f                        "verbose"
-  ;;      #f     "--count" 1    1          (builtin-converter 'int)  ""
-  ;;      "-f"   "--files" 1    unlimited  (lambda (s) s)            ""
+  ;;   => short  long      min  max        converter                                  description
+  ;;      "-v"   #f        0    0          #f                                         "verbose"
+  ;;      #f     "--count" 1    1          (builtin-converter 'int)                   ""
+  ;;      "-f"   "--files" 1    unlimited  (procedure->converter (lambda (s) s))      ""
   ;;
   ;;   (each record also keeps its clause as `source`)
   ;;
@@ -78,7 +79,7 @@
   ;;   (read-fields #'(:type int :long "--count") option)
   ;;   => long = "--count", converter = (builtin-converter 'int); the other fields are still unbound
   (define (read-fields fields option)
-    (syntax-case fields (:short :long :arity :type :description)
+    (syntax-case fields (:short :long :arity :type :choices :description)
       [() option]
       [(:short value . rest)
        (begin
@@ -98,7 +99,12 @@
       [(:type value . rest)
        (begin
          (option-ast-converter-set-if-not-given-yet!
-          option (read-converter #'value) (duplicate #'value))
+          option (read-converter #'value) (converter-given-twice #'value))
+         (read-fields #'rest option))]
+      [(:choices value . rest)
+       (begin
+         (option-ast-converter-set-if-not-given-yet!
+          option (read-choices #'value) (converter-given-twice #'value))
          (read-fields #'rest option))]
       [(:description value . rest)
        (begin
@@ -106,13 +112,18 @@
           option (read-description #'value) (duplicate #'value))
          (read-fields #'rest option))]
       [(bad . _)
-       (violation "unknown field, or field without a value (expected :short :long :arity :type :description)"
+       (violation "unknown field, or field without a value (expected :short :long :arity :type :choices :description)"
                   #'bad)]
       [_ (violation "an option clause is a list of :key value pairs" fields)]))
 
   ;; what to do when a field is given twice: a syntax violation at the second value
   (define (duplicate value)
     (lambda () (violation "duplicate field" value)))
+
+  ;; :type and :choices both set the one converter, so they exclude each other
+  (define (converter-given-twice value)
+    (lambda ()
+      (violation "the converter is given twice, use only one of :type and :choices" value)))
 
   ;; the :arity value -> (values min max), max is `unlimited` for (min +)
   ;;   n => (values n n)    (min max) => (values min max)    (min +) => (values min unlimited)
@@ -140,12 +151,42 @@
   ;; the :type value -> the expression of a converter, whether it is builtin or custom
   ;;   int            => #'(builtin-converter 'int), the lookup by name in the runtime
   ;;                     (see builtin-converters in __runtime.sls)
-  ;;   (lambda (s) s) => #'(lambda (s) s), the expression as it is
+  ;;   (lambda (s) s) => #'(procedure->converter (lambda (s) s)), the procedure becomes a converter
   (define (read-converter form)
     (if (assq (syntax->datum form) builtin-converters)
         (with-syntax ([name form])
           #'(builtin-converter 'name))
-        form))
+        (with-syntax ([procedure form])
+          #'(procedure->converter procedure))))
+
+  ;; the :choices value, a list of literals -> a converter expression
+  ;;   ("json" "text") => #'(make-choice-converter '("json" "text"))
+  ;; each choice is a string or an exact integer, there is at least one, and no two of them have the
+  ;; same text (the argument 1 would match both "1" and 1)
+  (define (read-choices form)
+    (with-syntax ([choices (datum->syntax #'here (read-choice-list form form '()))])
+      #'(make-choice-converter 'choices)))
+
+  ;; the datums of the literals in `rest`, checked; `texts` are the texts of those before
+  (define (read-choice-list rest whole texts)
+    (syntax-case rest ()
+      [() (if (null? texts)
+              (violation ":choices needs at least one choice" whole)
+              '())]
+      [(choice . more)
+       (let ([text (choice-text #'choice)])
+         (when (member text texts)
+           (violation "duplicate choice" #'choice))
+         (cons (syntax->datum #'choice)
+               (read-choice-list #'more whole (cons text texts))))]
+      [_ (violation ":choices must be a list of strings or integers" whole)]))
+
+  ;; the text an argument has to have to match the choice
+  (define (choice-text form)
+    (let ([datum (syntax->datum form)])
+      (cond [(string? datum) datum]
+            [(and (integer? datum) (exact? datum)) (number->string datum)]
+            [else (violation "a choice must be a string or an integer" form)])))
 
   (define (read-description form)
     (if (string? (syntax->datum form))
