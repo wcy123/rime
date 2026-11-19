@@ -50,15 +50,36 @@
   ;; long        string "--count", or #f; an option has a short name, a long name, or both
   ;; min         non-negative integer, the least number of arguments
   ;; max         non-negative integer, the most number of arguments, `unlimited` when there is no limit
-  ;; converter   how to turn the text of an argument into a value, #f when none was given:
-  ;;               an expression whose value is a converter object (see __runtime.sls) at compile
-  ;;               time, the converter object itself at runtime; opaque here, never inspected
+  ;; converter   how to turn the text of an argument into a value, #f when none was given (the text
+  ;;               is used as it is); what the field holds depends on the phase, see below
   ;; description string
   ;; source      opaque, where the option came from; only handed back to `report` below, #f at runtime
   ;; required    boolean, #t when it is an error that the option is absent; never #t for a flag
   ;;
   ;; The record is the same at compile time and at runtime: the generated code builds it again
   ;; (__codegen.sls) and the runtime works with it (__runtime.sls).
+  ;;
+  ;; The converter is the one field that is not the same thing in every phase. This module never
+  ;; looks inside it, it only asks whether there is one (a flag must not have one, see check-option).
+  ;;
+  ;;   parse (phase 1, __parse.sls): an expression, as a syntax object, that will build the converter
+  ;;   when the program runs. Nothing is evaluated yet, the clause only says which converter is wanted:
+  ;;
+  ;;     :type int                 => #'(builtin-converter 'int)
+  ;;     :type (lambda (s) s)      => #'(procedure->converter (lambda (s) s))
+  ;;     :choices ("json" "text")  => #'(make-choice-converter '("json" "text"))
+  ;;     no :type, no :choices     => #f
+  ;;
+  ;;   codegen (phase 2, __codegen.sls): that same expression is copied, as it is, into the
+  ;;   make-option-ast call of the generated code, so it is evaluated when the program starts.
+  ;;   #f is copied as the literal #f:
+  ;;
+  ;;     [:short "-n" :long "--count" :type int :description "repeat count"]  becomes
+  ;;     (make-option-ast "-n" "--count" 1 1 (builtin-converter 'int) "repeat count" #f #f)
+  ;;
+  ;;   runtime (__runtime.sls): the expression has been evaluated, so the field holds the converter
+  ;;   object itself: a label for the usage ("<int>", "{json,text}") and a procedure that converts
+  ;;   one word or raises the error the user sees. #f stands for the text as it is.
   ;;
   ;; While a clause is being read, the fields it has not given yet are `unbound`. The reader sets
   ;; them in place, only with the option-ast-<field>-set-if-not-given-yet! procedures below, and
