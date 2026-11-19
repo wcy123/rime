@@ -12,7 +12,7 @@
 
   ;; an option with the given parts, `tag` stands for its source
   (define (opt tag short long min max type)
-    (make-option-ast short long min max type "" tag))
+    (make-option-ast short long min max type "" tag #f))
 
   ;; the on-duplicate of a field that must not be given twice
   (define (never) (error 'test "field given twice"))
@@ -25,8 +25,8 @@
   (define (problems . options)
     (let ([found '()])
       (check-options options
-                     (lambda (message option)
-                       (set! found (cons (cons message (option-ast-source option)) found))))
+                     (lambda (message source)
+                       (set! found (cons (cons message source) found))))
       (reverse found)))
 
   (define short-message ":short name must look like \"-x\"")
@@ -37,15 +37,24 @@
   (define twice-message "option name is defined twice")
   (define reserved-message "-h and --help are reserved for the built-in help")
 
+  (define required-flag-message "a flag (arity 0) cannot be :required")
+
+  (define-test test-required-flag-is-a-problem
+    (CHECK equal? (problems (make-option-ast "-a" #f 0 0 #f "" 'a #t))
+           (list (cons required-flag-message 'a)))
+    (CHECK equal? (problems (make-option-ast "-a" #f 0 0 #f "" 'a #f)) '())
+    (CHECK equal? (problems (make-option-ast "-a" #f 0 1 #f "" 'a #t)) '()))
+
   (define-test test-record-fields
-    (let ([o (make-option-ast "-n" "--count" 0 2 'int "repeat" 'src)])
+    (let ([o (make-option-ast "-n" "--count" 0 2 'int "repeat" 'src #t)])
       (CHECK equal? (option-ast-short o) "-n")
       (CHECK equal? (option-ast-long o) "--count")
       (CHECK equal? (option-ast-min o) 0)
       (CHECK equal? (option-ast-max o) 2)
       (CHECK equal? (option-ast-converter o) 'int)
       (CHECK equal? (option-ast-description o) "repeat")
-      (CHECK equal? (option-ast-source o) 'src)))
+      (CHECK equal? (option-ast-source o) 'src)
+      (CHECK equal? (option-ast-required o) #t)))
 
   ;; ========================================
   ;; the unbound state, while a clause is being read
@@ -53,7 +62,7 @@
 
   (define (all-fields option)
     (list (option-ast-short option) (option-ast-long option) (option-ast-min option) (option-ast-max option)
-          (option-ast-converter option) (option-ast-description option)))
+          (option-ast-converter option) (option-ast-description option) (option-ast-required option)))
 
   (define-test test-unbound-is-not-a-value
     (CHECK eq? (unbound? unbound) #t)
@@ -64,7 +73,7 @@
   (define-test test-a-new-option-only-has-its-source
     (let ([o (make-unbound-option-ast 'src)])
       (CHECK equal? (option-ast-source o) 'src)
-      (CHECK equal? (map unbound? (all-fields o)) '(#t #t #t #t #t #t))))
+      (CHECK equal? (map unbound? (all-fields o)) '(#t #t #t #t #t #t #t))))
 
   (define-test test-fields-are-set-in-place
     (let ([o (make-unbound-option-ast 'src)])
@@ -74,8 +83,9 @@
       (option-ast-max-set-if-not-given-yet! o unlimited never)
       (option-ast-converter-set-if-not-given-yet! o 'expr never)
       (option-ast-description-set-if-not-given-yet! o "repeat" never)
-      (CHECK equal? (all-fields o) (list "-n" "--count" 0 unlimited 'expr "repeat"))
-      (CHECK equal? (map unbound? (all-fields o)) '(#f #f #f #f #f #f))))
+      (option-ast-required-set-if-not-given-yet! o #t never)
+      (CHECK equal? (all-fields o) (list "-n" "--count" 0 unlimited 'expr "repeat" #t))
+      (CHECK equal? (map unbound? (all-fields o)) '(#f #f #f #f #f #f #f))))
 
   ;; (field setter getter first second): the setter sets `first`, then calls on-duplicate for `second`
   (define wrappers
@@ -84,7 +94,8 @@
           (list "min" option-ast-min-set-if-not-given-yet! option-ast-min 1 2)
           (list "max" option-ast-max-set-if-not-given-yet! option-ast-max 3 4)
           (list "converter" option-ast-converter-set-if-not-given-yet! option-ast-converter 'e1 'e2)
-          (list "description" option-ast-description-set-if-not-given-yet! option-ast-description "d1" "d2")))
+          (list "description" option-ast-description-set-if-not-given-yet! option-ast-description "d1" "d2")
+          (list "required" option-ast-required-set-if-not-given-yet! option-ast-required #t #f)))
 
   (define-test test-set-if-not-given-yet-sets-an-unbound-field
     (for-each
@@ -150,12 +161,12 @@
       (CHECK eq? (unbound? (option-ast-long o)) #f)
       (CHECK eq? (unbound? (option-ast-converter o)) #f)
       (option-ast-fill-defaults! o)
-      (CHECK equal? (all-fields o) '(#f #f 1 1 #f ""))))
+      (CHECK equal? (all-fields o) '(#f #f 1 1 #f "" #f))))
 
   (define-test test-defaults-for-a-bare-option
     (let ([o (make-unbound-option-ast 'src)])
       (option-ast-fill-defaults! o)
-      (CHECK equal? (all-fields o) '(#f #f 1 1 #f ""))
+      (CHECK equal? (all-fields o) '(#f #f 1 1 #f "" #f))
       (CHECK equal? (option-ast-source o) 'src)))
 
   (define-test test-defaults-keep-what-was-given
@@ -166,13 +177,13 @@
       (option-ast-max-set-if-not-given-yet! o 5 never)
       (option-ast-converter-set-if-not-given-yet! o 'int never)
       (option-ast-fill-defaults! o)
-      (CHECK equal? (all-fields o) '("-n" "--count" 2 5 int ""))))
+      (CHECK equal? (all-fields o) '("-n" "--count" 2 5 int "" #f))))
 
   (define-test test-defaults-are-idempotent
     (let ([o (make-unbound-option-ast 'src)])
       (option-ast-fill-defaults! o)
       (option-ast-fill-defaults! o)
-      (CHECK equal? (all-fields o) '(#f #f 1 1 #f ""))))
+      (CHECK equal? (all-fields o) '(#f #f 1 1 #f "" #f))))
 
   (define-test test-unlimited-is-the-largest-possible-max
     (CHECK equal? unlimited (greatest-fixnum))
@@ -283,4 +294,137 @@
            (list (cons short-message 'a)
                  (cons arity-message 'a)
                  (cons flag-message 'b)
-                 (cons twice-message 'c)))))
+                 (cons twice-message 'c))))
+  ;; ========================================
+  ;; the lookup names of an option, without the dashes
+  ;; ========================================
+
+  (define-test test-lookup-names-drop-the-dashes
+    (CHECK equal? (option-lookup-names (opt 'a "-n" "--count" 1 1 #f)) '("n" "count"))
+    (CHECK equal? (option-lookup-names (opt 'a "-n" #f 1 1 #f)) '("n"))
+    (CHECK equal? (option-lookup-names (opt 'a #f "--count" 1 1 #f)) '("count")))
+
+  (define-test test-lookup-names-are-listed-once
+    (CHECK equal? (option-lookup-names (opt 'a "-emit" "--emit" 1 1 #f)) '("emit")))
+
+  (define-test test-short-and-long-name-of-the-same-option-may-look-alike
+    (CHECK equal? (problems (opt 'a "-emit" "--emit" 1 1 #f)) '()))
+
+  (define-test test-short-and-long-name-of-different-options-clash
+    (CHECK equal? (problems (opt 'a "-x" #f 1 1 #f) (opt 'b #f "--x" 1 1 #f))
+           (list (cons twice-message 'b))))
+
+  (define-test test-a-long-name-that-looks-like-the-help-name-is-reserved
+    (CHECK equal? (problems (opt 'a #f "--h" 1 1 #f)) (list (cons reserved-message 'a))))
+
+  ;; ========================================
+  ;; positional-ast
+  ;; ========================================
+
+  (define (positional tag name min max)
+    (make-positional-ast name min max #f "" tag))
+
+  (define (positional-problems positionals . options)
+    (let ([found '()])
+      (check-positionals positionals options
+                         (lambda (message source)
+                           (set! found (cons (cons message source) found))))
+      (reverse found)))
+
+  (define-test test-positional-record-fields
+    (let ([p (make-positional-ast "file" 0 unlimited 'int "files" 'src)])
+      (CHECK equal? (positional-ast-name p) "file")
+      (CHECK equal? (positional-ast-min p) 0)
+      (CHECK equal? (positional-ast-max p) unlimited)
+      (CHECK equal? (positional-ast-converter p) 'int)
+      (CHECK equal? (positional-ast-description p) "files")
+      (CHECK equal? (positional-ast-source p) 'src)
+      (CHECK eq? (positional-ast? p) #t)
+      (CHECK eq? (option-ast? p) #f)))
+
+  (define (all-positional-fields p)
+    (list (positional-ast-name p) (positional-ast-min p) (positional-ast-max p)
+          (positional-ast-converter p) (positional-ast-description p)))
+
+  (define-test test-a-new-positional-only-has-its-source
+    (let ([p (make-unbound-positional-ast 'src)])
+      (CHECK equal? (positional-ast-source p) 'src)
+      (CHECK equal? (map unbound? (all-positional-fields p)) '(#t #t #t #t #t))))
+
+  (define-test test-positional-fields-are-set-once
+    (let ([p (make-unbound-positional-ast 'src)]
+          [calls 0])
+      (positional-ast-name-set-if-not-given-yet! p "a" never)
+      (positional-ast-min-set-if-not-given-yet! p 1 never)
+      (positional-ast-max-set-if-not-given-yet! p 2 never)
+      (positional-ast-converter-set-if-not-given-yet! p 'int never)
+      (positional-ast-description-set-if-not-given-yet! p "d" never)
+      (CHECK equal? (all-positional-fields p) '("a" 1 2 int "d"))
+      (positional-ast-name-set-if-not-given-yet! p "b" (lambda () (set! calls (+ calls 1))))
+      (positional-ast-max-set-if-not-given-yet! p 9 (lambda () (set! calls (+ calls 1))))
+      (CHECK eqv? calls 2)
+      (CHECK equal? (all-positional-fields p) '("a" 1 2 int "d"))))
+
+  (define-test test-positional-defaults
+    (let ([p (make-unbound-positional-ast 'src)])
+      (positional-ast-name-set-if-not-given-yet! p "a" never)
+      (positional-ast-fill-defaults! p)
+      (CHECK equal? (all-positional-fields p) '("a" 1 1 #f ""))))
+
+  (define-test test-a-valid-positional-has-no-problem
+    (CHECK equal? (positional-problems (list (positional 'p "file" 1 unlimited))) '())
+    (CHECK equal? (positional-problems '()) '()))
+
+  (define variable-message
+    "only one positional argument can take a variable number of words, the others need an exact arity")
+
+  (define-test test-several-exact-positionals-are-fine
+    (CHECK equal? (positional-problems (list (positional 'p "a" 1 1) (positional 'q "b" 2 2) (positional 'r "c" 3 3)))
+           '()))
+
+  (define-test test-one-variable-positional-among-exact-ones-is-fine
+    (CHECK equal? (positional-problems (list (positional 'p "src" 1 unlimited) (positional 'q "dest" 1 1))) '())
+    (CHECK equal? (positional-problems (list (positional 'p "a" 2 2) (positional 'q "b" 0 3) (positional 'r "c" 1 1))) '()))
+
+  (define-test test-a-second-variable-positional-is-a-problem
+    (CHECK equal? (positional-problems (list (positional 'p "a" 1 unlimited) (positional 'q "b" 0 1)))
+           (list (cons variable-message 'q)))
+    (CHECK equal? (positional-problems (list (positional 'p "a" 0 1) (positional 'q "b" 0 1)))
+           (list (cons variable-message 'q)))
+    (CHECK equal? (positional-problems (list (positional 'p "a" 1 2) (positional 'q "b" 1 1) (positional 'r "c" 3 4)))
+           (list (cons variable-message 'r))))
+
+  (define-test test-two-positionals-with-the-same-name-are-a-problem
+    (CHECK equal? (positional-problems (list (positional 'p "a" 1 1) (positional 'q "a" 2 2)))
+           (list (cons "positional name is defined twice" 'q))))
+
+  (define-test test-positional-name-must-not-start-with-a-dash
+    (CHECK equal? (positional-problems (list (positional 'p "-a" 1 1)))
+           (list (cons "a positional name must not start with -" 'p))))
+
+  (define-test test-positional-name-must-be-well-formed
+    (for-each
+     (lambda (name)
+       (CHECK equal? (positional-problems (list (positional 'p name 1 1)))
+              (list (cons "a positional name must not be empty or contain =, , or whitespace" 'p))))
+     '("" "a b" "a=b" "a,b")))
+
+  (define-test test-positional-min-must-not-exceed-max
+    (CHECK equal? (positional-problems (list (positional 'p "a" 3 2)))
+           (list (cons arity-message 'p))))
+
+  (define-test test-positional-takes-at-least-one-word
+    (CHECK equal? (positional-problems (list (positional 'p "a" 0 0)))
+           (list (cons "a positional argument must take at least one word, arity 0 is not allowed" 'p))))
+
+  (define-test test-positional-name-must-not-clash-with-an-option
+    (CHECK equal? (positional-problems (list (positional 'p "v" 1 1)) (opt 'a "-v" #f 1 1 #f))
+           (list (cons "positional name clashes with an option name" 'p)))
+    (CHECK equal? (positional-problems (list (positional 'p "count" 1 1)) (opt 'a "-n" "--count" 1 1 #f))
+           (list (cons "positional name clashes with an option name" 'p)))
+    (CHECK equal? (positional-problems (list (positional 'p "other" 1 1)) (opt 'a "-n" "--count" 1 1 #f))
+           '()))
+
+  (define-test test-positional-name-must-not-be-a-help-name
+    (CHECK equal? (positional-problems (list (positional 'p "help" 1 1))) (list (cons reserved-message 'p)))
+    (CHECK equal? (positional-problems (list (positional 'p "h" 1 1))) (list (cons reserved-message 'p)))))

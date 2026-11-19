@@ -26,11 +26,26 @@
   (define (clause short . fields)
     (append (if short (list ':short short) '()) (apply append fields)))
 
+  ;; parse-options gives the options and the positionals; these are the options
+  (define (options-of clauses)
+    (let-values ([(options positionals) (parse-options clauses)])
+      options))
+
+  ;; ... these are the positionals
+  (define (positionals-of clauses)
+    (let-values ([(options positionals) (parse-options clauses)])
+      positionals))
+
+  ;; ... and this is the first positional, #f when there is none
+  (define (positional-of clauses)
+    (let ([positionals (positionals-of clauses)])
+      (if (null? positionals) #f (car positionals))))
+
   ;; the syntax of a list of clauses, as define-command-line-options receives them
   (define (clauses . clauses) (datum->syntax #'here clauses))
 
   ;; the single option of one clause
-  (define (parse . datums) (car (parse-options (clauses (apply clause datums)))))
+  (define (parse . datums) (car (options-of (clauses (apply clause datums)))))
 
   (define (parse-fails? . datums)
     (raises-syntax-violation? (lambda () (apply parse datums))))
@@ -75,7 +90,7 @@
 
   (define-test test-short-and-long-given-in-either-order
     (let ([a (parse "-a" '(:long "--alpha"))]
-          [b (parse-options (clauses '(:long "--alpha" :short "-a")))])
+          [b (options-of (clauses '(:long "--alpha" :short "-a")))])
       (CHECK equal? (option-ast-short a) "-a")
       (CHECK equal? (option-ast-long a) "--alpha")
       (CHECK equal? (option-ast-short (car b)) "-a")
@@ -94,11 +109,11 @@
 
   (define-test test-options-with-only-a-long-name-may-share-nothing
     (CHECK eq? (raises-syntax-violation?
-                (lambda () (parse-options (clauses (clause #f '(:long "--x"))
+                (lambda () (options-of (clauses (clause #f '(:long "--x"))
                                                    (clause #f '(:long "--x"))))))
            #t)
     (CHECK equal? (map option-ast-long
-                       (parse-options (clauses (clause #f '(:long "--x")) (clause #f '(:long "--y")))))
+                       (options-of (clauses (clause #f '(:long "--x")) (clause #f '(:long "--y")))))
            '("--x" "--y")))
 
   (define-test test-names-as-symbols
@@ -226,11 +241,11 @@
     (CHECK eq? (option-ast-converter (parse "-a" '(:arity 0))) #f))
 
   (define-test test-several-clauses-keep-their-order
-    (let ([options (parse-options (clauses (clause "-a") (clause "-b") (clause "-c")))])
+    (let ([options (options-of (clauses (clause "-a") (clause "-b") (clause "-c")))])
       (CHECK equal? (map option-ast-short options) '("-a" "-b" "-c"))))
 
   (define-test test-no-clauses
-    (CHECK equal? (parse-options (clauses)) '()))
+    (CHECK equal? (options-of (clauses)) '()))
 
   ;; ========================================
   ;; what is not a well formed clause
@@ -260,19 +275,19 @@
 
   (define-test test-something-that-is-not-a-keyword-in-field-position
     (CHECK eq? (raises-syntax-violation?
-                (lambda () (parse-options (clauses '(:short "-a" 42)))))
+                (lambda () (options-of (clauses '(:short "-a" 42)))))
            #t)
     (CHECK eq? (raises-syntax-violation?
-                (lambda () (parse-options (clauses '(:short "-a" "--long" "--x")))))
+                (lambda () (options-of (clauses '(:short "-a" "--long" "--x")))))
            #t))
 
   (define-test test-improper-clause-or-fields
     ;; the tail of the clause is not a list of fields
     (CHECK eq? (raises-syntax-violation?
-                (lambda () (parse-options (clauses (cons ':short (cons "-a" 5))))))
+                (lambda () (options-of (clauses (cons ':short (cons "-a" 5))))))
            #t)
     (CHECK eq? (raises-syntax-violation?
-                (lambda () (parse-options (clauses (cons ':short (cons "-a" (cons ':long 5)))))))
+                (lambda () (options-of (clauses (cons ':short (cons "-a" (cons ':long 5)))))))
            #t))
 
   (define-test test-duplicate-field-is-reported-whatever-the-order
@@ -285,16 +300,16 @@
     (CHECK equal? (min+max '(0 0)) '(0 . 0)))
 
   (define-test test-clause-must-be-a-list-of-fields
-    (CHECK eq? (raises-syntax-violation? (lambda () (parse-options (clauses "-a")))) #t)
-    (CHECK eq? (raises-syntax-violation? (lambda () (parse-options (clauses 42)))) #t))
+    (CHECK eq? (raises-syntax-violation? (lambda () (options-of (clauses "-a")))) #t)
+    (CHECK eq? (raises-syntax-violation? (lambda () (options-of (clauses 42)))) #t))
 
   (define-test test-empty-clause-has-no-name
-    (CHECK eq? (raises-syntax-violation? (lambda () (parse-options (clauses '())))) #t))
+    (CHECK eq? (raises-syntax-violation? (lambda () (options-of (clauses '())))) #t))
 
   (define-test test-old-syntax-with-a-leading-name-is-rejected
     ;; ["-n" :long "--count"]: the name must be given with :short
     (CHECK eq? (raises-syntax-violation?
-                (lambda () (parse-options (clauses '("-n" :long "--count")))))
+                (lambda () (options-of (clauses '("-n" :long "--count")))))
            #t))
 
   (define-test test-a-keyword-given-as-a-value-is-just-a-value
@@ -321,13 +336,13 @@
 
   (define-test test-duplicates-across-clauses
     (CHECK eq? (raises-syntax-violation?
-                (lambda () (parse-options (clauses (clause "-a") (clause "-a")))))
+                (lambda () (options-of (clauses (clause "-a") (clause "-a")))))
            #t)
     (CHECK eq? (raises-syntax-violation?
-                (lambda () (parse-options (clauses (clause (sym "-a")) (clause "-a")))))
+                (lambda () (options-of (clauses (clause (sym "-a")) (clause "-a")))))
            #t)
     (CHECK eq? (raises-syntax-violation?
-                (lambda () (parse-options (clauses (clause "-a" '(:long "--x"))
+                (lambda () (options-of (clauses (clause "-a" '(:long "--x"))
                                                    (clause "-b" '(:long "--x"))))))
            #t))
 
@@ -335,4 +350,141 @@
     (guard (e [(syntax-violation? e)
                (CHECK equal? (syntax->datum (syntax-violation-form e)) '(:short "-a" :arity (3 2)))])
       (parse "-a" '(:arity (3 2)))
-      (assert #f))))
+      (assert #f)))
+  ;; ========================================
+  ;; :required
+  ;; ========================================
+
+  (define-test test-required-is-off-by-default
+    (CHECK equal? (option-ast-required (parse "-a")) #f))
+
+  (define-test test-required-keyword-sets-it
+    (CHECK equal? (option-ast-required (parse "-a" '(:required))) #t)
+    (CHECK equal? (option-ast-required (parse "-a" '(:required) '(:long "--all"))) #t)
+    (CHECK equal? (option-ast-required (parse "-a" '(:long "--all") '(:required))) #t))
+
+  (define-test test-required-given-twice-is-a-violation
+    (CHECK eq? (parse-fails? "-a" '(:required) '(:required)) #t))
+
+  (define-test test-required-takes-no-value
+    (CHECK eq? (parse-fails? "-a" '(:required #t)) #t))
+
+  (define-test test-required-on-a-flag-is-a-violation
+    (CHECK eq? (parse-fails? "-a" '(:arity 0) '(:required)) #t)
+    (CHECK eq? (parse-fails? "-a" '(:arity (0 0)) '(:required)) #t)
+    (CHECK eq? (parse-fails? "-a" '(:arity (0 +)) '(:required)) #f))
+  ;; ========================================
+  ;; :positional
+  ;; ========================================
+
+  ;; the positional of one clause, the fields are given as lists, (:arity 2)
+  (define (parse-positional . fields)
+    (positional-of (clauses (apply append fields))))
+
+  (define (positional-fails? . fields)
+    (raises-syntax-violation? (lambda () (apply parse-positional fields))))
+
+  (define-test test-no-positional-clause-gives-no-positional
+    (CHECK equal? (positional-of (clauses (clause "-a"))) #f))
+
+  (define-test test-positional-clause-defaults
+    (let ([o (parse-positional '(:positional "file"))])
+      (CHECK equal? (positional-ast-name o) "file")
+      (CHECK equal? (positional-ast-min o) 1)
+      (CHECK equal? (positional-ast-max o) 1)
+      (CHECK equal? (positional-ast-converter o) #f)
+      (CHECK equal? (positional-ast-description o) "")))
+
+  (define-test test-positional-clause-full
+    (let ([o (parse-positional '(:positional "file") '(:arity (0 +)) '(:type int) '(:description "files"))])
+      (CHECK equal? (positional-ast-name o) "file")
+      (CHECK equal? (positional-ast-min o) 0)
+      (CHECK equal? (positional-ast-max o) unlimited)
+      (CHECK equal? (syntax->datum (positional-ast-converter o)) '(builtin-converter 'int))
+      (CHECK equal? (positional-ast-description o) "files")))
+
+  (define-test test-positional-clause-fields-in-any-order
+    (let ([o (parse-positional '(:arity 2) '(:description "d") '(:positional "p") '(:choices ("a" "b")))])
+      (CHECK equal? (positional-ast-name o) "p")
+      (CHECK equal? (positional-ast-min o) 2)
+      (CHECK equal? (positional-ast-description o) "d")))
+
+  (define-test test-positional-name-may-be-a-symbol
+    (CHECK equal? (positional-ast-name (parse-positional (list ':positional (sym "file")))) "file"))
+
+  (define-test test-positional-clause-does-not-disturb-the-options
+    (let-values ([(options positionals)
+                  (parse-options (clauses (clause "-a") '(:positional "p") (clause "-b")))])
+      (CHECK equal? (map option-ast-short options) '("-a" "-b"))
+      (CHECK equal? (map positional-ast-name positionals) '("p"))))
+
+  (define-test test-positionals-are-in-the-order-of-the-clauses
+    (CHECK equal? (map positional-ast-name
+                       (positionals-of (clauses '(:positional "a") (clause "-v") '(:positional "b")
+                                                '(:positional "c" :arity (0 +)))))
+           '("a" "b" "c")))
+
+  (define-test test-no-positional-clause-gives-no-positionals
+    (CHECK equal? (positionals-of (clauses (clause "-a"))) '()))
+
+  (define-test test-positional-clause-keeps-its-source
+    (let ([c (clause #f '(:positional "p"))])
+      (CHECK equal? (syntax->datum (positional-ast-source (positional-of (clauses c)))) c)))
+
+  (define-test test-positional-rejects-option-only-fields
+    (CHECK eq? (positional-fails? '(:positional "p") '(:short "-a")) #t)
+    (CHECK eq? (positional-fails? '(:positional "p") '(:long "--aa")) #t)
+    (CHECK eq? (positional-fails? '(:positional "p") '(:required)) #t))
+
+  (define-test test-positional-needs-a-name
+    (CHECK eq? (positional-fails? '(:positional)) #t)
+    (CHECK eq? (positional-fails? '(:positional 42)) #t))
+
+  (define-test test-positional-given-twice-is-a-violation
+    (CHECK eq? (positional-fails? '(:positional "a") '(:positional "b")) #t))
+
+  (define-test test-positional-field-given-twice-is-a-violation
+    (CHECK eq? (positional-fails? '(:positional "a") '(:arity 1) '(:arity 2)) #t)
+    (CHECK eq? (positional-fails? '(:positional "a") '(:description "x") '(:description "y")) #t))
+
+  (define-test test-positional-type-and-choices-exclude-each-other
+    (CHECK eq? (positional-fails? '(:positional "a") '(:type int) '(:choices ("a"))) #t))
+
+  (define-test test-two-positionals-with-a-variable-arity-are-a-violation
+    (CHECK eq? (raises-syntax-violation?
+                (lambda () (options-of (clauses '(:positional "a" :arity (0 1)) '(:positional "b" :arity (1 +))))))
+           #t))
+
+  (define-test test-two-positionals-with-the-same-name-are-a-violation
+    (CHECK eq? (raises-syntax-violation?
+                (lambda () (options-of (clauses '(:positional "a") '(:positional "a")))))
+           #t))
+
+  (define-test test-positional-with-arity-0-is-a-violation
+    (CHECK eq? (positional-fails? '(:positional "a") '(:arity 0)) #t))
+
+  (define-test test-two-positionals-that-both-take-a-variable-number-of-words
+    (for-each
+     (lambda (arities)
+       (CHECK eq? (raises-syntax-violation?
+                   (lambda ()
+                     (options-of (clauses `(:positional "a" :arity ,(car arities))
+                                          `(:positional "b" :arity ,(cadr arities))))))
+              #t))
+     '(((1 +) (1 +)) ((0 1) (0 1)) ((1 +) (1 2)) ((0 +) (2 +)))))
+
+  (define-test test-positionals-with-at-most-one-variable-arity-are-fine
+    (for-each
+     (lambda (arities)
+       (CHECK eq? (raises-syntax-violation?
+                   (lambda ()
+                     (options-of (clauses `(:positional "a" :arity ,(car arities))
+                                          `(:positional "b" :arity ,(cadr arities))))))
+              #f))
+     '(((1 +) 1) (1 (1 +)) (2 3) ((0 1) 2) (2 (0 +)) (1 1))))
+
+  (define-test test-one-positional-clause-with-any-arity-is-fine
+    (for-each
+     (lambda (arity)
+       (CHECK eq? (positional-ast? (positional-of (clauses `(:positional "a" :arity ,arity)))) #t))
+     '(1 2 (0 1) (1 +) (0 +) (2 5)))))
