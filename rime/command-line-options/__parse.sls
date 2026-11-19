@@ -93,7 +93,7 @@
       positional))
 
   (define (read-positional-fields fields positional)
-    (syntax-case fields (:positional :arity :type :choices :description :short :long :required :metavar)
+    (syntax-case fields (:positional :arity :type :choices :description :short :long :required)
       [() positional]
       [(:positional value . rest)
        (begin
@@ -126,8 +126,6 @@
        (violation ":long is a field of an option, not of a :positional clause" fields)]
       [(:required . _)
        (violation ":required is a field of an option, not of a :positional clause" fields)]
-      [(:metavar . _)
-       (violation ":metavar is a field of an option, not of a :positional clause" fields)]
       [(bad . _)
        (violation "unknown field, or field without a value (expected :positional :arity :type :choices :description)"
                   #'bad)]

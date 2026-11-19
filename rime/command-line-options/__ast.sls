@@ -23,7 +23,6 @@
           option-ast-required-set-if-not-given-yet!
           option-ast-metavar
           option-ast-metavar-set-if-not-given-yet!
-          option-ast-with-metavar
           option-ast?
           option-lookup-names
           make-positional-ast
@@ -92,8 +91,7 @@
   ;; source      opaque, where the option came from; only handed back to `report` below, #f at runtime
   ;; required    boolean, #t when it is an error that the option is absent; never #t for a flag
   ;; metavar     string "file", or #f; what the usage shows for an argument, <file>, instead of the
-  ;;               type; never given to a flag. It is not an argument of make-option-ast: the record
-  ;;               starts with #f, and option-ast-with-metavar gives the generated code a way to set it
+  ;;               type; never given to a flag
   ;;
   ;; The record is the same at compile time and at runtime: the generated code builds it again
   ;; (__codegen.sls) and the runtime works with it (__runtime.sls).
@@ -114,7 +112,7 @@
   ;;   #f is copied as the literal #f:
   ;;
   ;;     [:short "-n" :long "--count" :type int :description "repeat count"]  becomes
-  ;;     (make-option-ast "-n" "--count" 1 1 (builtin-converter 'int) "repeat count" #f #f)
+  ;;     (make-option-ast "-n" "--count" 1 1 (builtin-converter 'int) "repeat count" #f #f #f)
   ;;
   ;;   runtime (__runtime.sls): the expression has been evaluated, so the field holds the converter
   ;;   object itself: a label for the usage ("<int>", "{json,text}") and a procedure that converts
@@ -132,11 +130,7 @@
             (mutable description)
             source
             (mutable required)
-            (mutable metavar))
-    (protocol
-     (lambda (new)
-       (lambda (short long min max converter description source required)
-         (new short long min max converter description source required #f)))))
+            (mutable metavar)))
 
   (define-field-setters option-ast short long min max converter description required metavar)
 
@@ -169,14 +163,7 @@
 
   ;; an option that only has its source, everything else is still to be read
   (define (make-unbound-option-ast source)
-    (let ([option (make-option-ast unbound unbound unbound unbound unbound unbound source unbound)])
-      (option-ast-metavar-set! option unbound)
-      option))
-
-  ;; sets the metavar and returns the option, for the generated code to build an option with one
-  (define (option-ast-with-metavar option metavar)
-    (option-ast-metavar-set! option metavar)
-    option)
+    (make-option-ast unbound unbound unbound unbound unbound unbound source unbound unbound))
 
   ;; the defaults: no names, exactly one argument, no converter, no description, not required, no metavar;
   ;; only the fields that are still unbound are set
@@ -217,11 +204,8 @@
       (problem ":type and :choices must not be given when arity is 0"))
     (when (and (flag? option) (option-ast-required option))
       (problem "a flag (arity 0) cannot be :required"))
-    (when (option-ast-metavar option)
-      (when (flag? option)
-        (problem "a flag (arity 0) cannot have a :metavar"))
-      (when (or (string=? (option-ast-metavar option) "") (not (well-formed? (option-ast-metavar option))))
-        (problem ":metavar must not be empty or contain =, , or whitespace"))))
+    (when (and (flag? option) (option-ast-metavar option))
+      (problem "a flag (arity 0) cannot have a :metavar")))
 
   ;; The names the program uses to read an option are the names without their dashes. They must be
   ;; unique across all options, and must not be the names of the built-in help.

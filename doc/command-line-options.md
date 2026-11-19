@@ -189,17 +189,11 @@ The usage shows the type of an argument, `<string>`, `<int>`. `:metavar` says wh
 instead: the name is shown in angle brackets, as many times as the option takes arguments.
 
 ```scheme
-#!r6rs
-(import (rnrs (6)) (rime command-line-options))
-
 (define-command-line-options parse
   [:short "-i" :long "--input" :metavar "file" :description "file to read"]
   [:long "--format" :metavar "fmt" :choices ("json" "text") :description "output format"]
   [:short "-e" :long "--exclude" :arity (1 +) :metavar "pattern" :description "patterns to exclude"]
   [:short "-v" :arity 0 :description "verbose"])
-
-(define option (parse (cdr (command-line))))
-(write (option "input")) (newline)
 ```
 
 ```
@@ -208,19 +202,17 @@ Usage: /tmp/demo/prog [options]
 
 Options:
   -i, --input <file>          file to read
-      --format <fmt>          output format (one of: json, text)
+      --format <fmt>          output format
   -e, --exclude <pattern>...  patterns to exclude
   -v                          verbose
   -h, --help                  show this help message and exit
 ```
 
-* The name is a string or a symbol, not empty, without whitespace, `=` or `,`. A flag has no argument,
-  so `:metavar` on a flag (arity `0`) is a syntax violation.
-* It only changes the usage. The arguments are read, converted and checked as before.
-* With `:choices` the metavar wins in the placeholder, and the choices are listed at the end of the
-  description instead, `output format (one of: json, text)`. Without a metavar the usage shows
-  `{json,text}` in place of the type, as in [Choices](#choices).
-* A positional is already shown by its name, `<file>`, so `:metavar` is not allowed in a `:positional` clause.
+* It only changes the usage. The arguments are read, converted and checked as before, and `--format`
+  above still accepts only `json` and `text`. The metavar replaces what the usage would show instead,
+  `<string>`, or `{json,text}` for `:choices`; say the choices in the `:description` if you want them shown.
+* A flag has no argument, so `:metavar` on a flag (arity `0`) is a syntax violation.
+* A positional is already shown by its name, `<file>`, and has no `:metavar`.
 
 ## Positional arguments
 

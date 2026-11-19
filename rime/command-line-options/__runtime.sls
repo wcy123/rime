@@ -23,7 +23,6 @@
           procedure->converter
           make-converter
           converter-label
-          converter-choices
           converter-convert
           convert-bool
           convert-int
@@ -33,7 +32,7 @@
           (rime command-line-options __ast))
 
   (define help-spec
-    (make-option-ast "-h" "--help" 0 0 #f "show this help message and exit" #f #f))
+    (make-option-ast "-h" "--help" 0 0 #f "show this help message and exit" #f #f #f))
 
   ;; ========================================
   ;; parsing the command line
@@ -308,17 +307,8 @@
                                  positionals))))
           "\n"
           "Options:\n"
-          (format-rows (map (lambda (spec) (cons (flags spec) (usage-description spec)))
+          (format-rows (map (lambda (spec) (cons (flags spec) (option-ast-description spec)))
                             specs))))]))
-
-  ;; the description of an option in the usage. With a :metavar the converter's label is not shown,
-  ;; so the choices of a :choices option go here: "output format (one of: json, text)"
-  (define (usage-description spec)
-    (let ([choices (and (option-ast-metavar spec) (converter-choices (spec-converter spec)))]
-          [text (option-ast-description spec)])
-      (cond [(not choices) text]
-            [(string=? text "") (string-append "(one of: " (join choices ", ") ")")]
-            [else (string-append text " (one of: " (join choices ", ") ")")])))
 
   ;; rows is a list of (label . description); the descriptions line up, a multi-line description is
   ;; indented under its first line
@@ -436,14 +426,9 @@
   ;;   label    how an argument is shown in the usage: "<int>", "{json,text}"
   ;;   convert  (convert text option-name) => the value; when the text does not suit, it raises the
   ;;            error the user sees, so each kind of converter has its own failure
-  ;;   choices  the texts of the choices of a :choices converter, #f for any other; the usage lists
-  ;;            them when the option has a :metavar and so does not show the label
-  ;; The runtime only uses these, it does not know which kinds of converter there are.
+  ;; The runtime only uses these two, it does not know which kinds of converter there are.
   (define-record-type converter
-    (fields label convert (mutable choices))
-    (protocol
-     (lambda (new)
-       (lambda (label convert) (new label convert #f)))))
+    (fields label convert))
 
   ;; the converter of an option; no converter means the text as it is
   (define (spec-converter spec)
@@ -465,17 +450,14 @@
   ;; a converter for a list of choices, strings and exact integers; an integer is chosen by its
   ;; usual text and the value is the choice itself
   (define (make-choice-converter choices)
-    (let ([converter
-           (make-converter
-            (string-append "{" (join (map choice->text choices) ",") "}")
-            (lambda (text name)
-              (let loop ([rest choices])
-                (cond [(null? rest)
-                       (fail "argument must be one of the choices" name text choices)]
-                      [(string=? (choice->text (car rest)) text) (car rest)]
-                      [else (loop (cdr rest))]))))])
-      (converter-choices-set! converter (map choice->text choices))
-      converter))
+    (make-converter
+     (string-append "{" (join (map choice->text choices) ",") "}")
+     (lambda (text name)
+       (let loop ([rest choices])
+         (cond [(null? rest)
+                (fail "argument must be one of the choices" name text choices)]
+               [(string=? (choice->text (car rest)) text) (car rest)]
+               [else (loop (cdr rest))])))))
 
   (define (choice->text choice)
     (if (string? choice) choice (number->string choice)))

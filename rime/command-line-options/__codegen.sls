@@ -42,11 +42,6 @@
                   [max (datum->syntax #'here (option-ast-max option))]
                   [converter (or (option-ast-converter option) #'#f)]
                   [description (datum->syntax #'here (option-ast-description option))]
-                  [required (datum->syntax #'here (option-ast-required option))])
-      (let ([spec #'(make-option-ast short long min max converter description #f required)])
-        ;; the metavar is not an argument of make-option-ast, it is only set when there is one
-        (if (option-ast-metavar option)
-            (with-syntax ([spec spec]
-                          [metavar (datum->syntax #'here (option-ast-metavar option))])
-              #'(option-ast-with-metavar spec metavar))
-            spec)))))
+                  [required (datum->syntax #'here (option-ast-required option))]
+                  [metavar (datum->syntax #'here (option-ast-metavar option))])
+      #'(make-option-ast short long min max converter description #f required metavar))))
