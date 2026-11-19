@@ -32,7 +32,7 @@
           (rime command-line-options __ast))
 
   (define help-spec
-    (make-option-ast "-h" "--help" 0 0 #f "show this help message and exit" #f #f))
+    (make-option-ast "-h" "--help" 0 0 #f "show this help message and exit" #f #f #f))
 
   ;; ========================================
   ;; parsing the command line
@@ -345,9 +345,12 @@
           names
           (string-append names " " arguments))))
 
+  ;; "<int>", "{json,text}", or the <metavar> when the option has one
   (define (placeholder spec)
     (placeholder-of (option-ast-min spec) (option-ast-max spec)
-                    (converter-label (spec-converter spec))))
+                    (if (option-ast-metavar spec)
+                        (string-append "<" (option-ast-metavar spec) ">")
+                        (converter-label (spec-converter spec)))))
 
   ;; "<file>...", "[<file>]": how many words, shown with the name of the positional
   (define (positional-placeholder positional)

@@ -8,7 +8,7 @@
 (define-command-line-options parse
   [:short "-v" :long "--verbose" :arity 0
    :description "print more details about what is going on while the program runs"]
-  [:short "-n" :long "--count" :type int
+  [:short "-n" :long "--count" :type int :metavar "times"
    :description "how many times to repeat the work; this is a whole number, and the default is 1.\nUse 0 to only check the arguments without doing any work."]
   [:short "-e" :long "--exclude" :arity (1 +)
    :description "patterns to exclude, one or more, for example:\n  -e '*.tmp' '*.bak' '*~'\nAn argument that starts with a dash has to be escaped with a backslash."]

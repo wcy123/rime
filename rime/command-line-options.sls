@@ -2,7 +2,7 @@
 (library (rime command-line-options)
   (export define-command-line-options
           parse-or-exit command-line-error? command-line-error-usage
-          :short :long :arity :type :choices :description :required :positional)
+          :short :long :arity :type :choices :description :required :positional :metavar)
   (import (rnrs (6))
           (for (rnrs (6)) expand)
           (for (rime command-line-options __parse) expand)

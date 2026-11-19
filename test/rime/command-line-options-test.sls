@@ -1124,9 +1124,9 @@
   (define-test test-format-usage-aligns-long-only-names
     (CHECK string=?
            (format-usage
-            (list (make-option-ast "-a" "--alpha" 1 1 (builtin-converter 'int) "both" #f #f)
-                  (make-option-ast #f "--beta" 0 0 (builtin-converter 'string) "long only" #f #f)
-                  (make-option-ast "-c" #f 0 0 (builtin-converter 'string) "short only" #f #f))
+            (list (make-option-ast "-a" "--alpha" 1 1 (builtin-converter 'int) "both" #f #f #f)
+                  (make-option-ast #f "--beta" 0 0 (builtin-converter 'string) "long only" #f #f #f)
+                  (make-option-ast "-c" #f 0 0 (builtin-converter 'string) "short only" #f #f #f))
             "prog")
            (string-append
             "Usage: prog [options]\n"
@@ -1225,13 +1225,13 @@
     (let ([usage (format-usage
                   (list (make-option-ast "-f" "--format" 1 1
                                          (make-choice-converter '("json" "text" "yaml"))
-                                         "output format" #f #f)
+                                         "output format" #f #f #f)
                         (make-option-ast #f "--level" 1 1
-                                         (make-choice-converter '(1 2 4)) "verbosity level" #f #f)
+                                         (make-choice-converter '(1 2 4)) "verbosity level" #f #f #f)
                         (make-option-ast "-m" "--mode" 1 unlimited
-                                         (make-choice-converter '("a" "b" "c")) "mode" #f #f)
+                                         (make-choice-converter '("a" "b" "c")) "mode" #f #f #f)
                         (make-option-ast "-n" "--num" 0 2
-                                         (make-choice-converter '("x" "y")) "number" #f #f))
+                                         (make-choice-converter '("x" "y")) "number" #f #f #f))
                   "prog")])
       (CHECK eq? (and (contains? usage "-f, --format {json,text,yaml}  output format") #t) #t)
       (CHECK eq? (and (contains? usage "    --level {1,2,4}") #t) #t)
@@ -1243,8 +1243,8 @@
     (CHECK string=?
            (format-usage
             (list (make-option-ast "-f" "--format" 1 1 (make-choice-converter '("json" "text"))
-                                   "output format" #f #f)
-                  (make-option-ast "-v" "--verbose" 0 0 #f "verbose" #f #f))
+                                   "output format" #f #f #f)
+                  (make-option-ast "-v" "--verbose" 0 0 #f "verbose" #f #f #f))
             "prog")
            (string-append
             "Usage: prog [options]\n"
@@ -1336,12 +1336,12 @@
 
   (define usage-specs
     (list
-     (make-option-ast "-v" "--verbose" 0 0 (builtin-converter 'string) "verbose output" #f #f)
-     (make-option-ast "-n" "--count" 1 1 (builtin-converter 'int) "repeat count" #f #f)
-     (make-option-ast "-f" "--files" 1 unlimited (builtin-converter 'string) "input files" #f #f)
-     (make-option-ast "-r" "--range" 0 2 (builtin-converter 'int) "range" #f #f)
-     (make-option-ast "-q" #f 0 0 (builtin-converter 'string) "quiet" #f #f)
-     (make-option-ast "-u" "--upper" 1 1 (procedure->converter string-upcase) "first line\nsecond line" #f #f)))
+     (make-option-ast "-v" "--verbose" 0 0 (builtin-converter 'string) "verbose output" #f #f #f)
+     (make-option-ast "-n" "--count" 1 1 (builtin-converter 'int) "repeat count" #f #f #f)
+     (make-option-ast "-f" "--files" 1 unlimited (builtin-converter 'string) "input files" #f #f #f)
+     (make-option-ast "-r" "--range" 0 2 (builtin-converter 'int) "range" #f #f #f)
+     (make-option-ast "-q" #f 0 0 (builtin-converter 'string) "quiet" #f #f #f)
+     (make-option-ast "-u" "--upper" 1 1 (procedure->converter string-upcase) "first line\nsecond line" #f #f #f)))
 
   (define-test test-format-usage
     (CHECK string=?
@@ -1388,9 +1388,9 @@
   (define-test test-format-usage-placeholders
     (let ([usage (format-usage
                   (list
-                   (make-option-ast "-a" #f 2 2 (builtin-converter 'int) "d" #f #f)
-                   (make-option-ast "-b" #f 0 unlimited (builtin-converter 'string) "d" #f #f)
-                   (make-option-ast "-c" #f 1 3 (builtin-converter 'float) "d" #f #f))
+                   (make-option-ast "-a" #f 2 2 (builtin-converter 'int) "d" #f #f #f)
+                   (make-option-ast "-b" #f 0 unlimited (builtin-converter 'string) "d" #f #f #f)
+                   (make-option-ast "-c" #f 1 3 (builtin-converter 'float) "d" #f #f #f))
                   "p")])
       (CHECK eq? (and (contains? usage "-a <int> <int>") #t) #t)
       (CHECK eq? (and (contains? usage "-b [<string>...]") #t) #t)
@@ -1684,7 +1684,7 @@
                       (or (string->number text 16)
                           (error 'opt-parser "not a hexadecimal number" name text)))))
 
-  (define hex-spec (make-option-ast "-x" "--hex" 1 1 hex-converter "a hex number" #f #f))
+  (define hex-spec (make-option-ast "-x" "--hex" 1 1 hex-converter "a hex number" #f #f #f))
 
   (define-test test-a-new-kind-of-converter-needs-no-change-in-the-runtime
     (CHECK eqv? ((parse-command-line (list hex-spec) '("--hex" "ff")) "x") 255)
@@ -1700,7 +1700,7 @@
     (CHECK eq? (and (contains? (format-usage (list hex-spec) "p") "-x, --hex <hex>  a hex number") #t) #t))
 
   (define-test test-a-custom-procedure-fails-with-the-conversion-message
-    (let ([spec (make-option-ast "-a" #f 1 1 (procedure->converter (lambda (s) (error 'x "no"))) "d" #f #f)])
+    (let ([spec (make-option-ast "-a" #f 1 1 (procedure->converter (lambda (s) (error 'x "no"))) "d" #f #f #f)])
       (CHECK equal? (error-message (lambda () (parse-command-line (list spec) '("-a" "v"))))
              "invalid argument value")
       (CHECK equal? (error-irritants (lambda () (parse-command-line (list spec) '("-a" "v"))))
@@ -1708,11 +1708,11 @@
 
   (define-test test-usage-names-a-builtin-converter-and-calls-a-custom-one-a-value
     (let ([usage (format-usage
-                  (list (make-option-ast "-a" #f 1 1 (builtin-converter 'int) "d" #f #f)
-                        (make-option-ast "-b" #f 1 1 (builtin-converter 'float) "d" #f #f)
-                        (make-option-ast "-c" #f 1 1 (builtin-converter 'bool) "d" #f #f)
-                        (make-option-ast "-d" #f 1 1 (builtin-converter 'string) "d" #f #f)
-                        (make-option-ast "-e" #f 1 1 (procedure->converter string-upcase) "d" #f #f))
+                  (list (make-option-ast "-a" #f 1 1 (builtin-converter 'int) "d" #f #f #f)
+                        (make-option-ast "-b" #f 1 1 (builtin-converter 'float) "d" #f #f #f)
+                        (make-option-ast "-c" #f 1 1 (builtin-converter 'bool) "d" #f #f #f)
+                        (make-option-ast "-d" #f 1 1 (builtin-converter 'string) "d" #f #f #f)
+                        (make-option-ast "-e" #f 1 1 (procedure->converter string-upcase) "d" #f #f #f))
                   "p")])
       (for-each
        (lambda (flag)
@@ -1721,14 +1721,14 @@
 
   (define-test test-no-converter-means-the-text-as-it-is
     (let ([option (parse-command-line
-                   (list (make-option-ast "-a" #f 1 1 #f "d" #f #f)
-                         (make-option-ast "-b" #f 1 unlimited #f "d" #f #f))
+                   (list (make-option-ast "-a" #f 1 1 #f "d" #f #f #f)
+                         (make-option-ast "-b" #f 1 unlimited #f "d" #f #f #f))
                    '("-a" "12" "-b" "x" "y"))])
       (CHECK equal? (option "a") "12")
       (CHECK equal? (option "b") '("x" "y"))))
 
   (define-test test-usage-calls-no-converter-a-string
-    (let ([usage (format-usage (list (make-option-ast "-a" #f 1 1 #f "d" #f #f)) "p")])
+    (let ([usage (format-usage (list (make-option-ast "-a" #f 1 1 #f "d" #f #f #f)) "p")])
       (CHECK eq? (and (contains? usage "-a <string>") #t) #t)))
 
   (define-test test-convert-int-direct
@@ -1890,7 +1890,7 @@
 
   (define-test test-required-is-not-checked-when-help-is-asked
     (let ([shown #f])
-      (parse-command-line (list (make-option-ast "-i" "--input" 1 1 #f "" #f #t))
+      (parse-command-line (list (make-option-ast "-i" "--input" 1 1 #f "" #f #t #f))
                           '("--help")
                           (lambda (text) (set! shown text)))
       (CHECK eq? (and shown #t) #t)))
@@ -2035,7 +2035,7 @@
 
   (define-test test-help-needs-no-positional-word
     (let ([shown #f])
-      (parse-command-line (list (make-option-ast "-v" #f 0 0 #f "" #f #f))
+      (parse-command-line (list (make-option-ast "-v" #f 0 0 #f "" #f #f #f))
                           '("--help")
                           (lambda (text) (set! shown text))
                           (list (make-positional-ast "file" 1 1 #f "" #f)))
@@ -2070,6 +2070,52 @@
            (list 1 unlimited "<f>...")
            (list 0 unlimited "[<f>...]")
            (list 2 2 "<f> <f>"))))
+
+  ;; ========================================
+  ;; usage: :metavar
+  ;; ========================================
+
+  (define-command-line-options parse-metavar
+    [:short "-i" :long "--input" :metavar "file" :description "file to read"]
+    [:long "--pair" :arity 2 :metavar "n" :type int :description "two numbers"]
+    [:short "-e" :arity (1 +) :metavar "pattern" :description "patterns"]
+    [:long "--tag" :arity (0 +) :metavar "t"]
+    [:short "-w" :arity (0 2) :metavar "n" :type int]
+    [:short "-q" :arity 0 :description "quiet"])
+
+  (define-test test-metavar-replaces-the-type-in-the-usage
+    (CHECK equal? ((parse-metavar '()) 'help)
+           (string-append "Usage: " (program-name) " [options]\n"
+                          "\n"
+                          "Options:\n"
+                          "  -i, --input <file>  file to read\n"
+                          "      --pair <n> <n>  two numbers\n"
+                          "  -e <pattern>...     patterns\n"
+                          "      --tag [<t>...]\n"
+                          "  -w [<n>] [<n>]\n"
+                          "  -q" (spaces 18) "quiet\n"
+                          "  -h, --help" (spaces 10) "show this help message and exit\n")))
+
+  (define-test test-metavar-does-not-change-how-the-arguments-are-read
+    (let ([option (parse-metavar '("-i" "a.txt" "--pair" "1" "2" "-e" "x" "y"))])
+      (CHECK equal? (option "input") "a.txt")
+      (CHECK equal? (option "pair") '(1 2))
+      (CHECK equal? (option "e") '("x" "y")))
+    (CHECK equal? (error-message (lambda () (parse-metavar '("--pair" "1" "x")))) "invalid argument value"))
+
+  (define-command-line-options parse-metavar-choices
+    [:long "--format" :metavar "fmt" :choices ("json" "text") :description "output format"])
+
+  (define-test test-metavar-replaces-the-choices-in-the-usage-and-they-are-still-checked
+    (CHECK equal? ((parse-metavar-choices '()) 'help)
+           (string-append "Usage: " (program-name) " [options]\n"
+                          "\n"
+                          "Options:\n"
+                          "      --format <fmt>  output format\n"
+                          "  -h, --help          show this help message and exit\n"))
+    (CHECK equal? ((parse-metavar-choices '("--format" "json")) "format") "json")
+    (CHECK equal? (error-message (lambda () (parse-metavar-choices '("--format" "xml"))))
+           "argument must be one of the choices"))
 
   ;; ========================================
   ;; definition errors of :positional
@@ -2169,7 +2215,7 @@
 
   (define-test test-help-needs-neither-the-required-option-nor-the-positional
     (let ([shown #f])
-      (parse-command-line (list (make-option-ast #f "--input" 1 1 #f "" #f #t))
+      (parse-command-line (list (make-option-ast #f "--input" 1 1 #f "" #f #t #f))
                           '("-h")
                           (lambda (text) (set! shown text))
                           (list (make-positional-ast "file" 1 1 #f "" #f)))
@@ -2201,7 +2247,7 @@
     (let ([option (parse-mode '("fast" "-v"))])
       (CHECK equal? (option "mode") "fast"))
     (let ([option (parse-command-line
-                   (list (make-option-ast "-n" "--count" 1 1 (builtin-converter 'int) "" #f #f))
+                   (list (make-option-ast "-n" "--count" 1 1 (builtin-converter 'int) "" #f #f #f))
                    '("f" "--count=3")
                    default-on-help
                    (list (make-positional-ast "file" 1 1 #f "" #f)))])
@@ -2274,9 +2320,9 @@
   ;; ========================================
 
   (define scan-specs
-    (list (make-option-ast "-v" "--verbose" 0 0 #f "" #f #f)
-          (make-option-ast "-n" "--count" 1 1 (builtin-converter 'int) "" #f #f)
-          (make-option-ast "-e" #f 1 unlimited #f "" #f #f)))
+    (list (make-option-ast "-v" "--verbose" 0 0 #f "" #f #f #f)
+          (make-option-ast "-n" "--count" 1 1 (builtin-converter 'int) "" #f #f #f)
+          (make-option-ast "-e" #f 1 unlimited #f "" #f #f #f)))
 
   ;; (scan tokens) => (words help-asked? help-calls count-entry)
   (define (scan tokens)
@@ -2317,9 +2363,9 @@
       (CHECK equal? (parse-result-words result) '("z" "w"))))
 
   (define-test test-check-required-names-the-first-missing-option
-    (let ([specs (list (make-option-ast "-a" "--aa" 1 1 #f "" #f #t)
-                       (make-option-ast "-b" #f 1 1 #f "" #f #t)
-                       (make-option-ast "-c" #f 1 1 #f "" #f #f))]
+    (let ([specs (list (make-option-ast "-a" "--aa" 1 1 #f "" #f #t #f)
+                       (make-option-ast "-b" #f 1 1 #f "" #f #t #f)
+                       (make-option-ast "-c" #f 1 1 #f "" #f #f #f))]
           [table (make-eq-hashtable)])
       (CHECK equal? (error-irritants (lambda () (check-required specs table))) '("--aa"))
       (hashtable-set! table (car specs) '("x"))
@@ -2776,6 +2822,21 @@
        (#f [:short "-a" :required])
        (#f [:required :long "--abc"])
        (#f [:short "-a" :arity (0 +) :required]))))
+
+  (define-test test-definition-errors-of-the-metavar
+    (check-definition-rows
+     '((":metavar must be a string or a symbol" [:short "-a" :metavar 42])
+       ("a flag (arity 0) cannot have a :metavar" [:short "-a" :arity 0 :metavar "x"])
+       ("a flag (arity 0) cannot have a :metavar" [:short "-a" :arity (0 0) :metavar "x"])
+       ("duplicate field" [:short "-a" :metavar "x" :metavar "y"])
+       ("unknown field, or field without a value" [:short "-a" :metavar])
+       ("unknown field, or field without a value" [:positional "a" :metavar "x"])
+       (#f [:short "-a" :metavar "file"])
+       (#f [:short "-a" :metavar file])
+       (#f [:metavar "n" :short "-a" :arity (1 +)])
+       (#f [:short "-a" :metavar "n" :choices ("x" "y")])
+       (#f [:short "-a" :metavar "n" :type int :arity 2])
+       (#f [:short "-a" :metavar "-x"]))))
 
   (define-test test-definition-errors-of-the-clause-grammar
     (check-definition-rows

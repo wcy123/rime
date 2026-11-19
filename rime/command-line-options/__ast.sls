@@ -21,6 +21,8 @@
           option-ast-converter-set-if-not-given-yet!
           option-ast-description-set-if-not-given-yet!
           option-ast-required-set-if-not-given-yet!
+          option-ast-metavar
+          option-ast-metavar-set-if-not-given-yet!
           option-ast?
           option-lookup-names
           make-positional-ast
@@ -88,6 +90,8 @@
   ;; description string
   ;; source      opaque, where the option came from; only handed back to `report` below, #f at runtime
   ;; required    boolean, #t when it is an error that the option is absent; never #t for a flag
+  ;; metavar     string "file", or #f; what the usage shows for an argument, <file>, instead of the
+  ;;               type; never given to a flag
   ;;
   ;; The record is the same at compile time and at runtime: the generated code builds it again
   ;; (__codegen.sls) and the runtime works with it (__runtime.sls).
@@ -108,7 +112,7 @@
   ;;   #f is copied as the literal #f:
   ;;
   ;;     [:short "-n" :long "--count" :type int :description "repeat count"]  becomes
-  ;;     (make-option-ast "-n" "--count" 1 1 (builtin-converter 'int) "repeat count" #f #f)
+  ;;     (make-option-ast "-n" "--count" 1 1 (builtin-converter 'int) "repeat count" #f #f #f)
   ;;
   ;;   runtime (__runtime.sls): the expression has been evaluated, so the field holds the converter
   ;;   object itself: a label for the usage ("<int>", "{json,text}") and a procedure that converts
@@ -125,9 +129,10 @@
             (mutable converter)
             (mutable description)
             source
-            (mutable required)))
+            (mutable required)
+            (mutable metavar)))
 
-  (define-field-setters option-ast short long min max converter description required)
+  (define-field-setters option-ast short long min max converter description required metavar)
 
   ;; The :positional clause: the words of the command line that are not options.
   ;; name         string, what the program reads them by, and what the usage shows: <name>
@@ -158,9 +163,9 @@
 
   ;; an option that only has its source, everything else is still to be read
   (define (make-unbound-option-ast source)
-    (make-option-ast unbound unbound unbound unbound unbound unbound source unbound))
+    (make-option-ast unbound unbound unbound unbound unbound unbound source unbound unbound))
 
-  ;; the defaults: no names, exactly one argument, no converter, no description, not required;
+  ;; the defaults: no names, exactly one argument, no converter, no description, not required, no metavar;
   ;; only the fields that are still unbound are set
   (define (option-ast-fill-defaults! option)
     (option-ast-short-set-if-not-given-yet! option #f ignore)
@@ -169,7 +174,8 @@
     (option-ast-max-set-if-not-given-yet! option 1 ignore)
     (option-ast-converter-set-if-not-given-yet! option #f ignore)
     (option-ast-description-set-if-not-given-yet! option "" ignore)
-    (option-ast-required-set-if-not-given-yet! option #f ignore))
+    (option-ast-required-set-if-not-given-yet! option #f ignore)
+    (option-ast-metavar-set-if-not-given-yet! option #f ignore))
 
   (define (ignore) #f)
 
@@ -197,7 +203,9 @@
     (when (and (flag? option) (option-ast-converter option))
       (problem ":type and :choices must not be given when arity is 0"))
     (when (and (flag? option) (option-ast-required option))
-      (problem "a flag (arity 0) cannot be :required")))
+      (problem "a flag (arity 0) cannot be :required"))
+    (when (and (flag? option) (option-ast-metavar option))
+      (problem "a flag (arity 0) cannot have a :metavar")))
 
   ;; The names the program uses to read an option are the names without their dashes. They must be
   ;; unique across all options, and must not be the names of the built-in help.

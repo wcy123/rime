@@ -143,7 +143,7 @@
   ;;   (read-fields #'(:type int :long "--count") option)
   ;;   => long = "--count", converter = (builtin-converter 'int); the other fields are still unbound
   (define (read-fields fields option)
-    (syntax-case fields (:short :long :arity :type :choices :description :required)
+    (syntax-case fields (:short :long :arity :type :choices :description :required :metavar)
       [() option]
       [(:short value . rest)
        (begin
@@ -179,8 +179,13 @@
        (begin
          (option-ast-required-set-if-not-given-yet! option #t (duplicate fields))
          (read-fields #'rest option))]
+      [(:metavar value . rest)
+       (begin
+         (option-ast-metavar-set-if-not-given-yet!
+          option (name->string #'value ":metavar") (duplicate #'value))
+         (read-fields #'rest option))]
       [(bad . _)
-       (violation "unknown field, or field without a value (expected :short :long :arity :type :choices :description :required)"
+       (violation "unknown field, or field without a value (expected :short :long :arity :type :choices :description :required :metavar)"
                   #'bad)]
       [_ (violation "an option clause is a list of :key value pairs" fields)]))
 

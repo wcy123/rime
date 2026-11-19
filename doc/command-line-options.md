@@ -48,8 +48,9 @@ optional second one, the [help hook](#help).
 | `:choices (...)`     | the arguments must be one of these, see [Choices](#choices) | none       |
 | `:description "..."` | text shown by `--help`                                     | empty      |
 | `:required`          | it is an error when the option is absent, see [Required options](#required-options) | optional |
+| `:metavar "name"`    | what the usage shows for an argument, see [Metavar](#metavar), not allowed with arity `0` | the type |
 
-The keywords `:short :long :arity :type :choices :description :required :positional` are exported by the library, so import it whole
+The keywords `:short :long :arity :type :choices :description :required :metavar :positional` are exported by the library, so import it whole
 (`(import (rime command-line-options))`); `(only (rime command-line-options) define-command-line-options)`
 would leave them unbound and the clauses would be rejected.
 
@@ -181,6 +182,37 @@ An option counts as given when it is on the command line, even with no arguments
 a required `-o` with arity `(0 +)` is satisfied by `-o` alone. `-h` and `--help` need no
 required option, they print the usage first. A flag (arity `0`) cannot be `:required`, that is
 a syntax violation when the program is compiled.
+
+## Metavar
+
+The usage shows the type of an argument, `<string>`, `<int>`. `:metavar` says what the argument is
+instead: the name is shown in angle brackets, as many times as the option takes arguments.
+
+```scheme
+(define-command-line-options parse
+  [:short "-i" :long "--input" :metavar "file" :description "file to read"]
+  [:long "--format" :metavar "fmt" :choices ("json" "text") :description "output format"]
+  [:short "-e" :long "--exclude" :arity (1 +) :metavar "pattern" :description "patterns to exclude"]
+  [:short "-v" :arity 0 :description "verbose"])
+```
+
+```
+$ prog -h
+Usage: /tmp/demo/prog [options]
+
+Options:
+  -i, --input <file>          file to read
+      --format <fmt>          output format
+  -e, --exclude <pattern>...  patterns to exclude
+  -v                          verbose
+  -h, --help                  show this help message and exit
+```
+
+* It only changes the usage. The arguments are read, converted and checked as before, and `--format`
+  above still accepts only `json` and `text`. The metavar replaces what the usage would show instead,
+  `<string>`, or `{json,text}` for `:choices`; say the choices in the `:description` if you want them shown.
+* A flag has no argument, so `:metavar` on a flag (arity `0`) is a syntax violation.
+* A positional is already shown by its name, `<file>`, and has no `:metavar`.
 
 ## Positional arguments
 
@@ -651,7 +683,7 @@ The exported macro is just those two calls.
 | `__parse.sls`                       | phase 1, read: walks the clauses and fields by pattern matching, builds records |
 | `__ast.sls`                         | the `option-ast` and `positional-ast` records, and the semantic rules (names, arity, converter, duplicates) |
 | `__codegen.sls`                     | phase 2, write: generates the definition, which builds the same records again at runtime; never reads user syntax |
-| `__keywords.sls`                    | the field keywords `:short :long :arity :type :choices :description :required :positional` |
+| `__keywords.sls`                    | the field keywords `:short :long :arity :type :choices :description :required :positional :metavar` |
 | `__runtime.sls`                      | the runtime: parses the command line, builds the accessor, prints the usage; the `&command-line-error` condition and `parse-or-exit`; the builtin converters |
 
 A converter is an object with a label for the usage and a conversion that raises its own error, so the
