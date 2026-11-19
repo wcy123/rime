@@ -1938,17 +1938,18 @@
     [:short "-q" :long "--quiet" :arity (0 +) :default () :description "no default shown"])
 
   (define-test test-usage-shows-the-default
+    ;; the widest label is "-q, --quiet [<string>...]", 25 characters
     (CHECK equal? ((parse-default-usage '()) 'help)
            (string-append
             "Usage: " (program-name) " [options]\n"
             "\n"
             "Options:\n"
-            "  -n, --count <int>" (spaces 9) "repeat count (default: 3)\n"
-            "      --format {json,text}  (default: text)\n"
-            "  -e <string>..." (spaces 12) "first line (default: a, b)\n"
-            (spaces 28) "second line\n"
-            "  -q, --quiet [<string>...]  no default shown\n"
-            "  -h, --help" (spaces 18) "show this help message and exit\n")))
+            "  -n, --count <int>" (spaces 10) "repeat count (default: 3)\n"
+            "      --format {json,text}" (spaces 3) "(default: text)\n"
+            "  -e <string>..." (spaces 13) "first line (default: a, b)\n"
+            (spaces 29) "second line\n"
+            "  -q, --quiet [<string>...]" (spaces 2) "no default shown\n"
+            "  -h, --help" (spaces 17) "show this help message and exit\n")))
 
   (define-test test-an-invalid-default-of-a-custom-type-is-reported-when-parsing
     (let ([parse-bad (eval '(let ()
