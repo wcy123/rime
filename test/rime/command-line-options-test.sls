@@ -743,15 +743,105 @@
       (CHECK eq? (command-line-error? #f) #f)
       (CHECK eq? (command-line-error? 'oops) #f)))
 
-  (define-test test-the-report-is-the-message-the-irritants-and-the-usage
+  ;; the sentence of the report: what comes before the blank line that separates it from the usage
+  (define (report-sentence e)
+    (let* ([report (format-command-line-error e)]
+           [end (let loop ([i 0])
+                  (cond [(>= (+ i 1) (string-length report)) (string-length report)]
+                        [(and (char=? (string-ref report i) #\newline)
+                              (char=? (string-ref report (+ i 1)) #\newline))
+                         i]
+                        [else (loop (+ i 1))]))])
+      (substring report 0 end)))
+
+  ;; (message details sentence thunk): the thunk raises the error, and what a person reads is the sentence
+  (define report-rows
+    (list
+     (list "invalid argument value" '("-n" "abc")
+           "invalid argument \"abc\" for -n"
+           (lambda () (parse '("-n" "abc"))))
+     (list "argument must be one of the choices" '("--format" "xml" ("json" "text" "yaml"))
+           "\"xml\" is not one of json, text, yaml (for --format)"
+           (lambda () (with-choices '("--format" "xml"))))
+     (list "argument must be one of the choices" '("--level" "3" (1 2 4))
+           "\"3\" is not one of 1, 2, 4 (for --level)"
+           (lambda () (with-choices '("--level" "3"))))
+     (list "too few arguments for option" '("-n")
+           "too few arguments for -n"
+           (lambda () (parse '("-n"))))
+     (list "too few arguments for option" '("--pair")
+           "too few arguments for --pair"
+           (lambda () (parse '("--pair=3"))))
+     (list "too many arguments for option" '("--pair")
+           "too many arguments for --pair"
+           (lambda () (parse '("--pair" "1" "2" "--pair" "3" "4"))))
+     (list "option does not take arguments" '("--verbose")
+           "--verbose does not take arguments"
+           (lambda () (parse '("--verbose=1"))))
+     (list "missing required option" '("--input")
+           "missing required option --input"
+           (lambda () (parse-required '())))
+     (list "missing required option" '("-k")
+           "missing required option -k"
+           (lambda () (parse-required-short '())))
+     (list "too few positional arguments" '("file")
+           "missing positional argument <file>"
+           (lambda () (parse-one '())))
+     (list "too many positional arguments" '("b" "c")
+           "too many positional arguments: b c"
+           (lambda () (parse-one '("a" "b" "c"))))
+     (list "unexpected positional argument" '("a")
+           "unexpected positional argument: a"
+           (lambda () (parse-none '("a"))))
+     (list "unexpected positional argument" '("a b" "c")
+           "unexpected positional argument: \"a b\" c"
+           (lambda () (parse-none '("a b" "c"))))))
+
+  (define-test test-the-report-says-which-option-and-which-text
+    (for-each
+     (lambda (row)
+       (let ([e (raised (caddr (cdr row)))])
+         (CHECK equal? (list (cadr row) (report-sentence e))
+                (list (cadr row) (string-append (program-name) ": " (caddr row))))))
+     report-rows))
+
+  (define-test test-the-report-is-the-sentence-and-the-usage
     (let ([e (raised (lambda () (parse '("-n" "abc"))))])
       (CHECK equal? (format-command-line-error e)
-             (string-append (program-name) ": invalid argument value: \"-n\" \"abc\"\n\n"
+             (string-append (program-name) ": invalid argument \"abc\" for -n\n\n"
                             ((parse '()) "help"))))
     (let ([e (raised (lambda () (parse-required '())))])
       (CHECK equal? (format-command-line-error e)
-             (string-append (program-name) ": missing required option: \"--input\"\n\n"
+             (string-append (program-name) ": missing required option --input\n\n"
                             ((parse-required '("-i" "a")) "help")))))
+
+  (define-test test-the-message-and-the-details-of-the-condition-are-not-changed
+    (for-each
+     (lambda (row)
+       (let ([e (raised (cadddr row))])
+         (CHECK equal? (list (cadr row) (condition-message e) (condition-irritants e))
+                (list (cadr row) (car row) (cadr row)))))
+     (map (lambda (row) (list (car row) (cadr row) (caddr row) (cadddr row))) report-rows)))
+
+  (define-test test-describe-problem-gives-the-sentence-of-a-message
+    (CHECK equal? (describe-problem "too many arguments for option" '("--pair")) "too many arguments for --pair")
+    (CHECK equal? (describe-problem "invalid argument value" '("--name" "")) "invalid argument \"\" for --name")
+    (CHECK equal? (describe-problem "invalid argument value" '("--name" "a \"b\""))
+           "invalid argument \"a \\\"b\\\"\" for --name"))
+
+  (define-test test-describe-problem-has-nothing-to-say-about-what-it-does-not-know
+    ;; a message that is not in the table, and the details of a known message in another shape
+    (CHECK eq? (describe-problem "not an integer" '("zz")) #f)
+    (CHECK eq? (describe-problem "something new" '()) #f)
+    (CHECK eq? (describe-problem "missing required option" '()) #f)
+    (CHECK eq? (describe-problem "invalid argument value" '("-n")) #f))
+
+  (define-test test-a-message-that-is-not-in-the-table-is-reported-as-before
+    ;; a converter called directly fails with its own message, and there is no usage yet
+    (let ([e (raised (lambda () (convert-int "zz")))])
+      (CHECK equal? (condition-message e) "not an integer")
+      (CHECK equal? (format-command-line-error e)
+             (string-append (program-name) ": not an integer: \"zz\"\n\n"))))
 
   ;; ========================================
   ;; accessor errors
@@ -1672,11 +1762,11 @@
         (CHECK eqv? (car result) 2)
         (CHECK equal? (cadr result) "")
         (CHECK equal? (caddr result)
-               (string-append (program-name) ": invalid argument value: \"-n\" \"abc\"\n\n"
+               (string-append (program-name) ": invalid argument \"abc\" for -n\n\n"
                               ((parse '()) "help"))))
       (let ([result (run-capturing-exit-and-error (lambda () (parse-or-exit parse-one '())))])
         (CHECK eqv? (car result) 2)
-        (CHECK eq? (contains? (caddr result) "too few positional arguments: \"file\"") #t)
+        (CHECK eq? (contains? (caddr result) "missing positional argument <file>") #t)
         (CHECK eq? (contains? (caddr result) "Usage: ") #t))))
 
   (define-test test-parse-or-exit-lets-the-other-errors-through
