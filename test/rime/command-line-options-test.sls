@@ -211,6 +211,56 @@
     (let ([option (parse '("--name=-weird"))])
       (CHECK equal? (option "s") "-weird")))
 
+  ;; after =, the value is split at the commas only for an option that takes several arguments
+  (define-command-line-options parse-comma
+    [:short "-t" :long "--title" :description "one argument"]
+    [:long "--text" :arity (0 1) :type string :description "zero or one argument"]
+    [:long "--level" :arity (0 1) :type int :description "zero or one integer"]
+    [:long "--pair" :arity 2 :description "two arguments"]
+    [:long "--files" :arity (1 +) :description "several arguments"]
+    [:long "--range" :arity (0 2) :description "up to two arguments"]
+    [:long "--flag" :arity 0 :description "a flag"])
+
+  (define-test test-form-equals-one-argument-keeps-its-commas
+    (CHECK equal? ((parse-comma '("--title=Hello, World")) "title") "Hello, World")
+    (CHECK equal? ((parse-comma '("-t=a,b,c")) "t") "a,b,c")
+    (CHECK equal? ((parse-comma '("--title=a,,b,")) "title") "a,,b,")
+    (CHECK equal? ((parse-comma '("--title=,")) "title") ","))
+
+  (define-test test-form-equals-one-argument-splits-at-the-first-equals-only
+    (CHECK equal? ((parse-comma '("--title=a=b,c")) "title") "a=b,c")
+    (CHECK equal? ((parse-comma '("--title==")) "title") "="))
+
+  (define-test test-form-equals-one-argument-empty-value
+    (CHECK equal? ((parse-comma '("--title=")) "title") ""))
+
+  (define-test test-form-equals-zero-or-one-argument-keeps-its-commas
+    (CHECK equal? ((parse-comma '("--text=1,2")) "text") '("1,2"))
+    (CHECK equal? ((parse-comma '("--text=a")) "text") '("a"))
+    (CHECK equal? (error-message (lambda () (parse-comma '("--level=1,2")))) "invalid argument value")
+    (CHECK equal? (error-irritants (lambda () (parse-comma '("--level=1,2")))) '("--level" "1,2"))
+    (CHECK equal? ((parse-comma '("--level=7")) "level") '(7)))
+
+  (define-test test-form-equals-several-arguments-still-splits
+    (CHECK equal? ((parse-comma '("--pair=3,4")) "pair") '("3" "4"))
+    (CHECK equal? ((parse-comma '("--files=a,b,c")) "files") '("a" "b" "c"))
+    (CHECK equal? ((parse-comma '("--files=a")) "files") '("a"))
+    (CHECK equal? ((parse-comma '("--range=1,2")) "range") '("1" "2"))
+    (CHECK equal? ((parse-comma '("--range=1")) "range") '("1")))
+
+  (define-test test-form-equals-several-arguments-still-counts-them
+    (CHECK equal? (error-message (lambda () (parse-comma '("--pair=1")))) "too few arguments for option")
+    (CHECK equal? (error-message (lambda () (parse-comma '("--pair=1,2,3")))) "too many arguments for option")
+    (CHECK equal? (error-message (lambda () (parse-comma '("--range=1,2,3")))) "too many arguments for option"))
+
+  (define-test test-form-equals-a-flag-takes-no-value-whatever-it-contains
+    (CHECK equal? (error-message (lambda () (parse-comma '("--flag=1")))) "option does not take arguments")
+    (CHECK equal? (error-message (lambda () (parse-comma '("--flag=a,b")))) "option does not take arguments"))
+
+  (define-test test-form-space-and-equals-agree-for-one-argument
+    (CHECK equal? ((parse-comma '("--title" "Hello, World")) "title")
+           ((parse-comma '("--title=Hello, World")) "title")))
+
   (define-test test-form-equals-empty-value
     (let ([option (parse '("--name="))])
       (CHECK equal? (option "s") "")))
@@ -387,10 +437,16 @@
            "too few arguments for option"))
 
   (define-test test-error-too-many-in-equals-form
-    (CHECK equal? (error-message (lambda () (parse '("--count=1,2"))))
-           "too many arguments for option")
     (CHECK equal? (error-message (lambda () (parse '("--range=1,2,3"))))
+           "too many arguments for option")
+    (CHECK equal? (error-message (lambda () (parse '("--pair=1,2,3"))))
            "too many arguments for option"))
+
+  (define-test test-equals-form-of-a-typed-one-argument-option-is-not-split
+    (CHECK equal? (error-message (lambda () (parse '("--count=1,2"))))
+           "invalid argument value")
+    (CHECK equal? (error-irritants (lambda () (parse '("--count=1,2"))))
+           '("--count" "1,2")))
 
   (define-test test-error-arity-0-with-equals
     (CHECK equal? (error-message (lambda () (parse '("--verbose=1"))))
