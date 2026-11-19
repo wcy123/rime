@@ -48,24 +48,41 @@
 
   (define-test test-arity-0-present
     (let ([option (parse '("-v" "-q"))])
-      (CHECK eq? (option "v") 'present)
-      (CHECK eq? (option "verbose") 'present)
-      (CHECK eq? (option "q") 'present)))
+      (CHECK eq? (option "v") #t)
+      (CHECK eq? (option "verbose") #t)
+      (CHECK eq? (option "q") #t)))
 
   (define-test test-arity-0-absent
     (let ([option (parse '())])
-      (CHECK eq? (option "v") 'absent)
-      (CHECK eq? (option "verbose") 'absent)
-      (CHECK eq? (option "q") 'absent)))
+      (CHECK eq? (option "v") #f)
+      (CHECK eq? (option "verbose") #f)
+      (CHECK eq? (option "q") #f)))
 
   (define-test test-arity-0-long-name
     (let ([option (parse '("--verbose"))])
-      (CHECK eq? (option "v") 'present)
-      (CHECK eq? (option "q") 'absent)))
+      (CHECK eq? (option "v") #t)
+      (CHECK eq? (option "q") #f)))
+
+  (define-test test-an-absent-flag-is-false-in-an-if
+    ;; the symbol 'absent used to be truthy, so this always gave yes
+    (CHECK eq? (if ((parse '()) "verbose") 'yes 'no) 'no)
+    (CHECK eq? (if ((parse '("-v")) "verbose") 'yes 'no) 'yes)
+    (CHECK eq? (and ((parse '("-v")) "v") ((parse '("-q")) "q")) #t)
+    (CHECK eq? (or ((parse '()) "v") ((parse '()) "q")) #f))
+
+  (define-test test-a-flag-is-exactly-a-boolean
+    (CHECK eq? (boolean? ((parse '("-v")) "v")) #t)
+    (CHECK eq? (boolean? ((parse '()) "v")) #t)
+    (CHECK eq? ((parse '("-v")) "v") #t)
+    (CHECK eq? ((parse '()) "v") #f))
+
+  (define-test test-a-flag-given-twice-is-still-true
+    (CHECK eq? ((parse '("-v" "-v")) "v") #t)
+    (CHECK eq? ((parse '("-v" "--verbose")) "verbose") #t))
 
   (define-test test-arity-0-does-not-consume-next
     (let ([option (parse '("-v" "file"))])
-      (CHECK eq? (option "v") 'present)
+      (CHECK eq? (option "v") #t)
       (CHECK equal? (positional option 0) "file")))
 
   ;; ========================================
@@ -278,7 +295,7 @@
 
   (define-test test-form-mixed
     (let ([option (parse '("-v" "--count=2" "-f" "a" "b" "-s" "n" "--ratio" "0.5"))])
-      (CHECK eq? (option "v") 'present)
+      (CHECK eq? (option "v") #t)
       (CHECK eqv? (option "n") 2)
       (CHECK equal? (option "f") '("a" "b"))
       (CHECK equal? (option "s") "n")
@@ -352,7 +369,7 @@
 
   (define-test test-positional-after-options
     (let ([option (parse '("-v" "-n" "3" "in.txt" "out.txt"))])
-      (CHECK eq? (option "v") 'present)
+      (CHECK eq? (option "v") #t)
       (CHECK eqv? (option "n") 3)
       (CHECK eqv? (positional-count option) 2)
       (CHECK equal? (positional option 0) "in.txt")
@@ -360,7 +377,7 @@
 
   (define-test test-positional-after-double-dash
     (let ([option (parse '("-v" "--" "a" "b"))])
-      (CHECK eq? (option "v") 'present)
+      (CHECK eq? (option "v") #t)
       (CHECK eqv? (positional-count option) 2)
       (CHECK equal? (positional option 0) "a")
       (CHECK equal? (positional option 1) "b")))
@@ -373,7 +390,7 @@
 
   (define-test test-double-dash-then-option-like-is-literal
     (let ([option (parse '("--" "-v" "--count" "\\-x"))])
-      (CHECK eq? (option "v") 'absent)
+      (CHECK eq? (option "v") #f)
       (CHECK eqv? (positional-count option) 3)
       (CHECK equal? (positional option 0) "-v")
       (CHECK equal? (positional option 1) "--count")
@@ -386,7 +403,7 @@
 
   (define-test test-options-after-the-first-positional-are-options
     (let ([option (parse '("a" "-v" "--count" "5"))])
-      (CHECK eq? (option "v") 'present)
+      (CHECK eq? (option "v") #t)
       (CHECK eqv? (option "n") 5)
       (CHECK eqv? (positional-count option) 1)
       (CHECK equal? (positional option 0) "a")))
@@ -602,8 +619,8 @@
     (let ([option (parse '("-n" "4" "-v"))])
       (CHECK eqv? (option (sym "n")) 4)
       (CHECK eqv? (option (sym "count")) 4)
-      (CHECK eq? (option (sym "verbose")) 'present)
-      (CHECK eq? (option (sym "q")) 'absent)))
+      (CHECK eq? (option (sym "verbose")) #t)
+      (CHECK eq? (option (sym "q")) #f)))
 
   (define-test test-accessor-unknown-symbol-option
     (let ([option (parse '())])
@@ -677,8 +694,8 @@
     (CHECK eq? ((exactly-one '()) "e") #f))
 
   (define-test test-arity-pair-0-0-is-flag
-    (CHECK eq? ((flag '("-g")) "g") 'present)
-    (CHECK eq? ((flag '()) "g") 'absent))
+    (CHECK eq? ((flag '("-g")) "g") #t)
+    (CHECK eq? ((flag '()) "g") #f))
 
   (define-test test-no-options-defined
     (CHECK eq? (procedure? (none '())) #t)
@@ -845,7 +862,7 @@
   (define-test test-long-only-option
     (let ([option (mixed-names '("--long-only" "3"))])
       (CHECK eqv? (option "long-only") 3)
-      (CHECK eq? (option "s") 'absent)))
+      (CHECK eq? (option "s") #f)))
 
   (define-test test-long-only-option-with-equals
     (let ([option (mixed-names '("--long-only=4"))])
@@ -853,15 +870,15 @@
 
   (define-test test-long-only-flag
     (let ([option (mixed-names '("--flag-only"))])
-      (CHECK eq? (option "flag-only") 'present)
-      (CHECK eq? ((mixed-names '()) "flag-only") 'absent)))
+      (CHECK eq? (option "flag-only") #t)
+      (CHECK eq? ((mixed-names '()) "flag-only") #f)))
 
   (define-test test-long-only-option-absent
     (CHECK eq? ((mixed-names '()) "long-only") #f))
 
   (define-test test-short-only-option
     (let ([option (mixed-names '("-s"))])
-      (CHECK eq? (option "s") 'present)))
+      (CHECK eq? (option "s") #t)))
 
   (define-test test-option-with-both-names
     (CHECK equal? ((mixed-names '("-b" "x")) "both") "x")
@@ -877,8 +894,8 @@
     ;; each option is told apart by itself, not by a name
     (let ([option (mixed-names '("--long-only" "7" "--flag-only"))])
       (CHECK eqv? (option "long-only") 7)
-      (CHECK eq? (option "flag-only") 'present)
-      (CHECK eq? (option "s") 'absent)
+      (CHECK eq? (option "flag-only") #t)
+      (CHECK eq? (option "s") #f)
       (CHECK eq? (option "b") #f)))
 
   (define env (environment '(rnrs (6)) '(rime command-line-options)))
@@ -1078,7 +1095,7 @@
         (CHECK eq? (and (contains? (cdr result) "--delta {-1,0,1}") #t) #t))))
 
   (define-test test-a-flag-next-to-choices-still-works
-    (CHECK eq? ((with-choices '("-v" "--format" "json")) "v") 'present))
+    (CHECK eq? ((with-choices '("-v" "--format" "json")) "v") #t))
 
   (define-test test-choices-on-a-flag-is-a-syntax-error
     (CHECK eq? (syntax-error?
@@ -1224,7 +1241,7 @@
            [option (parse-command-line usage-specs '("-h")
                                        (lambda (text) (set! shown text)))])
       (CHECK equal? shown (format-usage usage-specs (program-name)))
-      (CHECK eq? (option "v") 'absent)))
+      (CHECK eq? (option "v") #f)))
 
   (define-test test-help-long-calls-handler
     (let ([shown #f])
@@ -1485,37 +1502,37 @@
       (list (option "emit") (option "opt") (option "x") (positionals option))))
 
   (define-test test-mixed-option-before-positional
-    (CHECK equal? (mixed '("--emit=ast" "example.toy")) '("ast" absent #f ("example.toy"))))
+    (CHECK equal? (mixed '("--emit=ast" "example.toy")) '("ast" #f #f ("example.toy"))))
 
   (define-test test-mixed-option-after-positional
-    (CHECK equal? (mixed '("example.toy" "--emit=ast")) '("ast" absent #f ("example.toy"))))
+    (CHECK equal? (mixed '("example.toy" "--emit=ast")) '("ast" #f #f ("example.toy"))))
 
   (define-test test-mixed-lone-dash-is-positional
-    (CHECK equal? (mixed '("-" "--emit=ast")) '("ast" absent #f ("-"))))
+    (CHECK equal? (mixed '("-" "--emit=ast")) '("ast" #f #f ("-"))))
 
   (define-test test-mixed-option-argument-after-positional
-    (CHECK equal? (mixed '("example.toy" "-emit" "ast")) '("ast" absent #f ("example.toy"))))
+    (CHECK equal? (mixed '("example.toy" "-emit" "ast")) '("ast" #f #f ("example.toy"))))
 
   (define-test test-mixed-flag-after-positional
-    (CHECK equal? (mixed '("example.toy" "-emit=mlir" "-opt")) '("mlir" present #f ("example.toy"))))
+    (CHECK equal? (mixed '("example.toy" "-emit=mlir" "-opt")) '("mlir" #t #f ("example.toy"))))
 
   (define-test test-mixed-option-before-and-after-positional
     (CHECK equal? (mixed '("-x" "mlir" "driver-input.txt" "-emit=mlir"))
-           '("mlir" absent "mlir" ("driver-input.txt")))
+           '("mlir" #f "mlir" ("driver-input.txt")))
     (CHECK equal? (mixed '("driver-input.txt" "-x" "mlir" "-emit=mlir"))
-           '("mlir" absent "mlir" ("driver-input.txt"))))
+           '("mlir" #f "mlir" ("driver-input.txt"))))
 
   (define-test test-mixed-positional-only
-    (CHECK equal? (mixed '("example.toy")) '(#f absent #f ("example.toy"))))
+    (CHECK equal? (mixed '("example.toy")) '(#f #f #f ("example.toy"))))
 
   (define-test test-mixed-double-dash-ends-options
-    (CHECK equal? (mixed '("example.toy" "--" "--emit=ast")) '(#f absent #f ("example.toy" "--emit=ast")))
-    (CHECK equal? (mixed '("-opt" "--" "-x")) '(#f present #f ("-x")))
-    (CHECK equal? (mixed '("a" "--" "b" "-opt")) '(#f absent #f ("a" "b" "-opt"))))
+    (CHECK equal? (mixed '("example.toy" "--" "--emit=ast")) '(#f #f #f ("example.toy" "--emit=ast")))
+    (CHECK equal? (mixed '("-opt" "--" "-x")) '(#f #t #f ("-x")))
+    (CHECK equal? (mixed '("a" "--" "b" "-opt")) '(#f #f #f ("a" "b" "-opt"))))
 
   (define-test test-mixed-positional-order-is-kept
     (let ([option (parse-mixed '("a" "-v" "b" "-v" "c"))])
-      (CHECK eq? (option "v") 'present)
+      (CHECK eq? (option "v") #t)
       (CHECK equal? (positionals option) '("a" "b" "c"))
       (CHECK eqv? (length (positionals option)) 3)))
 
@@ -1530,11 +1547,11 @@
   (define-test test-mixed-unlimited-arity-stops-at-an-option
     (let ([option (parse-mixed '("-e" "x" "y" "-v" "b"))])
       (CHECK equal? (option "e") '("x" "y"))
-      (CHECK eq? (option "v") 'present)
+      (CHECK eq? (option "v") #t)
       (CHECK equal? (positionals option) '("b"))))
 
   (define-test test-mixed-last-occurrence-wins
-    (CHECK equal? (mixed '("-emit=a" "f" "-emit=b")) '("b" absent #f ("f"))))
+    (CHECK equal? (mixed '("-emit=a" "f" "-emit=b")) '("b" #f #f ("f"))))
 
   (define-test test-mixed-undefined-dash-word-after-positional
     (CHECK equal? ((parse-mixed '("f" "--nope")) "files") '("f" "--nope")))
@@ -1643,7 +1660,7 @@
   (define-test test-lookup-names-have-no-dashes
     (let ([option (parse-names '("-emit" "ast" "-v" "--level" "3"))])
       (CHECK equal? (option "emit") "ast")
-      (CHECK eq? (option "v") 'present)
+      (CHECK eq? (option "v") #t)
       (CHECK eqv? (option "level") 3)
       (CHECK eqv? (option 'level) 3)))
 
@@ -1727,9 +1744,9 @@
     (CHECK equal? (error-irritants (lambda () (parse-mode '("x")))) '("mode" "x" ("fast" "slow"))))
 
   (define-test test-positional-and-options-in-any-order
-    (CHECK eq? ((parse-mode '("-v" "fast")) "v") 'present)
+    (CHECK eq? ((parse-mode '("-v" "fast")) "v") #t)
     (CHECK equal? ((parse-mode '("fast" "-v")) "mode") "fast")
-    (CHECK eq? ((parse-mode '("fast" "-v")) "v") 'present))
+    (CHECK eq? ((parse-mode '("fast" "-v")) "v") #t))
 
   (define-test test-positional-after-double-dash-and-escaped
     (CHECK equal? ((parse-files '("--" "-a" "-b")) "files") '("-a" "-b"))
@@ -1741,7 +1758,7 @@
     (CHECK equal? (error-message (lambda () (parse-none '("--" "x")))) "unexpected positional argument"))
 
   (define-test test-no-positional-word-and-no-clause-is-fine
-    (CHECK eq? ((parse-none '("-v")) "v") 'present))
+    (CHECK eq? ((parse-none '("-v")) "v") #t))
 
   (define-test test-help-needs-no-positional-word
     (let ([shown #f])
@@ -2144,7 +2161,7 @@
 
   (define-test test-several-positionals-and-options-in-any-order
     (let ([option (parse-cp '("a" "-v" "b" "c"))])
-      (CHECK eq? (option "v") 'present)
+      (CHECK eq? (option "v") #t)
       (CHECK equal? (values-of option "source" "dest") '(("a" "b") "c")))
     (let ([option (parse-cp '("-v" "a" "--" "-b"))])
       (CHECK equal? (values-of option "source" "dest") '(("a") "-b"))))
