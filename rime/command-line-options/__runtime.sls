@@ -62,6 +62,7 @@
                  [table (parse-result-table result)])
             (unless (parse-result-help-asked? result)
               (check-required specs table)
+              (check-collected specs table)
               (store-positional-words! table (distribute-words positionals (parse-result-words result))))
             (make-accessor specs positionals table))))]))
 
@@ -101,15 +102,14 @@
            [spec (find-spec-by-token specs name)])
       (cond
        [equals
-        (cond [(= 0 (option-ast-max spec))
-               (fail "option does not take arguments" name)]
-              [(> (option-ast-min spec) 1)
-               (fail "too few arguments for option" name)])
+        (when (= 0 (option-ast-max spec))
+          (fail "option does not take arguments" name))
         (store! table spec name (list (substring token (+ equals 1) (string-length token))))
         rest]
        [else
         (let-values ([(items remaining) (take-arguments specs rest (option-ast-max spec))])
-          (when (< (length items) (option-ast-min spec))
+          ;; an option that collects its arguments is checked on the total, see check-collected
+          (when (and (not (collecting? spec)) (< (length items) (option-ast-min spec)))
             (fail "too few arguments for option" name))
           (store! table spec name items)
           remaining)])))
@@ -124,14 +124,31 @@
   (define (argument-token? token specs)
     (not (or (string=? token "--") (option-like? token specs))))
 
-  ;; An option with an upper limit holds at most max values, so a later occurrence replaces the earlier
-  ;; one. An option without a limit, (1 +), is a list, and a later occurrence adds to it.
+  ;; An option that takes several arguments, max above 1, collects the arguments of all its occurrences
+  ;; in one flat list, and check-collected checks the total. Any other option, a flag or one with at
+  ;; most one argument, keeps the last occurrence.
+  (define (collecting? spec)
+    (> (option-ast-max spec) 1))
+
   (define (store! table spec name items)
     (let ([values (convert-items spec name items)])
       (hashtable-set! table spec
-                      (if (= (option-ast-max spec) unlimited)
+                      (if (collecting? spec)
                           (append (hashtable-ref table spec '()) values)
                           values))))
+
+  ;; the arity of an option that collects its arguments is checked on the total, after the scan
+  (define (check-collected specs table)
+    (for-each
+     (lambda (spec)
+       (when (and (collecting? spec) (hashtable-contains? table spec))
+         (let ([count (length (hashtable-ref table spec '()))]
+               [name (or (option-ast-long spec) (option-ast-short spec))])
+           (when (< count (option-ast-min spec))
+             (fail "too few arguments for option" name))
+           (when (> count (option-ast-max spec))
+             (fail "too many arguments for option" name)))))
+     specs))
 
   ;; the converter reports its own failure, it is given the name of the option for that
   (define (convert-items spec name items)

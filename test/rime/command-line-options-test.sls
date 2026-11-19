@@ -303,7 +303,8 @@
     (CHECK equal? ((parse '("--files=")) "files") '(""))
     (CHECK equal? ((parse '("-f=")) "f") '(""))
     (CHECK equal? ((parse '("--name=")) "name") "")
-    (CHECK equal? (error-message (lambda () (parse '("--pair=")))) "too few arguments for option")
+    ;; --pair is an integer option too: the empty text is converted first, and it is not an integer
+    (CHECK equal? (error-message (lambda () (parse '("--pair=")))) "invalid argument value")
     (CHECK equal? (error-message (lambda () (parse '("--count=")))) "invalid argument value"))
 
   (define-test test-form-mixed
@@ -619,9 +620,9 @@
     ;; 1,2,3 is one argument, and not an integer
     (CHECK equal? (error-message (lambda () (parse '("--range=1,2,3"))))
            "invalid argument value")
-    ;; --pair needs two arguments, = gives one
+    ;; --pair is an integer option too, and the one text 1,2,3 is not an integer
     (CHECK equal? (error-message (lambda () (parse '("--pair=1,2,3"))))
-           "too few arguments for option"))
+           "invalid argument value"))
 
   (define-test test-equals-form-of-a-typed-one-argument-option-is-not-split
     (CHECK equal? (error-message (lambda () (parse '("--count=1,2"))))

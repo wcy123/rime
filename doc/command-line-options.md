@@ -302,11 +302,13 @@ returned, and with any other arity the list of words. A repeated option is descr
 
 An option that is given more than once follows its arity:
 
-* An option with an upper limit holds at most `max` values: arity `0`, `1`, `2`, `(0 1)`, `(0 2)` and so on.
-  A later occurrence replaces the earlier one, the last one wins. This is what argparse and click do,
-  and it lets a wrapper or an alias set a default that the user can override.
-* An option without an upper limit is a list: arity `(1 +)`, `(0 +)`, `(n +)`. A later occurrence
-  adds its arguments to the list, in order, flat. This is how a repeated `-I dir` collects directories.
+* An option that takes several arguments, `max` above 1 (`2`, `(0 2)`, `(1 +)`, ...), collects the
+  arguments of all its occurrences in one flat list, in order. The total is checked when the whole
+  command line has been read: at least `min` and at most `max`, otherwise it is an error
+  (`too few` or `too many arguments for option`). With no upper limit, `(1 +)`, only the minimum can fail.
+* Any other option, a flag or an option with at most one argument (`0`, `1`, `(0 1)`), keeps its last
+  occurrence. This is what argparse and click do, and it lets a wrapper or an alias set a default that
+  the user can override.
 
 ```scheme
 (define-command-line-options parse
@@ -320,8 +322,20 @@ An option that is given more than once follows its arity:
 $ prog -n 1 -n 2                        ; one argument: the last one wins
 "count" => 2
 
-$ prog -s 10 20 -s 30 40                ; a fixed arity: the last one wins
-"size" => (30 40)
+$ prog -s 10 20
+"size" => (10 20)
+
+$ prog -s 10 -s 20                      ; several arguments: they are collected
+"size" => (10 20)
+
+$ prog --size=10 --size=20              ; = gives one argument each time
+"size" => (10 20)
+
+$ prog -s 10 20 -s 30 40                ; the total is 4, and -s takes 2
+Exception in opt-parser: too many arguments for option with irritant "--size"
+
+$ prog -s 10                            ; the total is 1
+Exception in opt-parser: too few arguments for option with irritant "--size"
 
 $ prog -I a -I b                        ; no upper limit: they add up
 "include" => ("a" "b")
@@ -336,19 +350,15 @@ $ prog -I a -I b main.c                 ; the last -I also takes main.c
 $ prog -I a -I=b main.c                 ; = takes exactly one argument
 "include" => ("a" "b")
 "file" => ("main.c")
-
-$ prog -I a -I b -- main.c              ; -- ends the options
-"include" => ("a" "b")
-"file" => ("main.c")
 ```
 
-* The values keep their type: a value is a flat list of the same kind of value however many times the
-  option was given, `(1 2)` or `(1 2 3 4)`; the occurrences are not kept apart.
+* The value of an option that takes several arguments is always a flat list of the same kind of value,
+  `(10 20)` however many occurrences it came from; the occurrences are not kept apart.
 * Each occurrence is converted and checked on its own, so a bad value in the second one is
   `invalid argument value`.
-* An option without a limit takes every ordinary word after it, also after the last occurrence, as always:
-  `-I a -I b main.c` gives `main.c` to `-I`. Write `-I=b main.c`, which takes exactly one argument,
-  or put `--` before the file.
+* An option that takes several arguments takes every ordinary word after it, up to its maximum, also
+  after the last occurrence: `-I a -I b main.c` gives `main.c` to `-I`. Write `-I=b main.c`, which takes
+  exactly one argument, or put `--` before the file.
 * A default given to the accessor is used only when the option was not given at all.
 
 ## A default for an option that was not given
@@ -418,8 +428,9 @@ prog --exclude=a file          ; with =, exactly one argument, "file" is a posit
   There is no comma list. The words that follow are not consumed, so `=` is the way to stop an option that
   takes a variable number of arguments (`--exclude=a file` leaves `file` positional, `--exclude a file`
   would take it), and the way to give an optional argument without ambiguity, `--window=2`.
-* An option that needs two or more arguments cannot use `=`, which gives one: `--pair=3,4` is
-  `too few arguments for option`, write `--pair 3 4`.
+* An option that needs two or more arguments can use `=` once for each argument, `--pair=3 --pair=4`,
+  see [Repeating an option](#repeating-an-option). `--pair=3,4` is one argument, `too few arguments for
+  option`: write `--pair 3 4`.
 * A flag does not accept `=`.
 
 ```
@@ -570,7 +581,8 @@ for the details) work on it. The library never exits by itself except for `-h`, 
 
 | message                            | when                                                  | details                |
 |------------------------------------|-------------------------------------------------------|------------------------|
-| `too few arguments for option`     | fewer than `min` arguments, also `--name=x` for an option that needs two or more | the option name        |
+| `too few arguments for option`     | fewer than `min` arguments, for an option that takes several: in total, from all its occurrences | the option name        |
+| `too many arguments for option`    | more than `max` arguments in total, from several occurrences of an option that takes several | the option name        |
 | `option does not take arguments`   | `--flag=1` on an arity 0 option                       | the option name        |
 | `invalid argument value`           | the conversion failed                                 | the option name, the text |
 | `argument must be one of the choices` | the argument is not one of the `:choices`          | the option name, the text, the choices |
