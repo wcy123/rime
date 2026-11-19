@@ -9,28 +9,19 @@
           (rime command-line-options __runtime))
 
   ;; parser: the identifier to define; options: list of option-ast;
-  ;; positionals: list of positional-ast, in the order of the clauses;
-  ;; program: the program-ast, or #f; it is only passed to the runtime when there is one
-  (define (generate-definition parser options positionals program)
+  ;; positionals: list of positional-ast, in the order of the clauses
+  (define (generate-definition parser options positionals)
     (with-syntax ([parser parser]
                   [(spec ...) (map option->spec-expression options)]
-                  [(positional ...) (map positional->expression positionals)]
-                  [(program ...) (if program (list (program->expression program)) '())])
+                  [(positional ...) (map positional->expression positionals)])
       #'(define parser
           (let ([specs (list spec ...)]
                 [positionals (list positional ...)])
             (case-lambda
               [(arguments)
-               (parse-command-line specs arguments default-on-help positionals program ...)]
+               (parse-command-line specs arguments default-on-help positionals)]
               [(arguments on-help)
-               (parse-command-line specs arguments on-help positionals program ...)])))))
-
-  ;; the same for the program-ast
-  (define (program->expression program)
-    (with-syntax ([description (datum->syntax #'here (program-ast-description program))]
-                  [epilog (datum->syntax #'here (program-ast-epilog program))]
-                  [version (datum->syntax #'here (program-ast-version program))])
-      #'(make-program-ast description epilog version #f)))
+               (parse-command-line specs arguments on-help positionals)])))))
 
   ;; the same for the positional-ast
   (define (positional->expression positional)

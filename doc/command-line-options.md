@@ -35,8 +35,7 @@ The names to read an option by are the names without the dashes. A runnable vers
 ```
 
 Each `[...]` clause defines one option, except a clause with `:positional`, which describes the
-positional arguments, see [Positional arguments](#positional-arguments), and a clause with `:program`,
-which says something about the program, see [Program text and version](#program-text-and-version). `<parser>` becomes a
+positional arguments, see [Positional arguments](#positional-arguments). `<parser>` becomes a
 function of one argument, the list of command line arguments (without the program name), and an
 optional second one, the [help hook](#help).
 
@@ -51,7 +50,7 @@ optional second one, the [help hook](#help).
 | `:required`          | it is an error when the option is absent, see [Required options](#required-options) | optional |
 | `:metavar "name"`    | what the usage shows for an argument, see [Metavar](#metavar), not allowed with arity `0` | the type |
 
-The keywords `:short :long :arity :type :choices :description :required :metavar :positional :program :epilog :version` are exported by the library, so import it whole
+The keywords `:short :long :arity :type :choices :description :required :metavar :positional` are exported by the library, so import it whole
 (`(import (rime command-line-options))`); `(only (rime command-line-options) define-command-line-options)`
 would leave them unbound and the clauses would be rejected.
 
@@ -282,75 +281,6 @@ Exception in opt-parser: too few positional arguments with irritant "source"
 
 How the words are given on the command line is in [Command line syntax](#command-line-syntax).
 
-## Program text and version
-
-A clause with `:program`, at most one, says something about the whole program. The keyword has no
-value; its fields are strings and can be written in any order:
-
-| field                | meaning                                                                  |
-|----------------------|--------------------------------------------------------------------------|
-| `:description "..."` | a paragraph shown under the first line of the usage                      |
-| `:epilog "..."`      | a paragraph shown after the options                                      |
-| `:version "1.2.3"`   | adds `--version` and `-V`, which print the version and exit              |
-
-```scheme
-#!r6rs
-(import (rnrs (6)) (rime command-line-options))
-
-(define-command-line-options parse
-  [:program :description "Copy files to a directory."
-            :epilog "Example: cp-lite a.txt b.txt dest/"
-            :version "1.2.3"]
-  [:short "-v" :arity 0 :description "print each file that is copied"]
-  [:positional "source" :arity (1 +) :description "files to copy"]
-  [:positional "dest" :description "where to copy them"])
-
-(define option (parse (cdr (command-line))))
-(write (option "source")) (newline)
-(write (option "dest")) (newline)
-```
-
-```
-$ cp-lite -h
-Usage: /tmp/demo/cp-lite [options] [--] <source>... <dest>
-
-Copy files to a directory.
-
-Arguments:
-  <source>...  files to copy
-  <dest>       where to copy them
-
-Options:
-  -v             print each file that is copied
-  -h, --help     show this help message and exit
-  -V, --version  show the version and exit
-
-Example: cp-lite a.txt b.txt dest/
-
-$ cp-lite --version
-/tmp/demo/cp-lite 1.2.3
-
-$ cp-lite -V
-/tmp/demo/cp-lite 1.2.3
-
-$ cp-lite a b dest/
-("a" "b")
-"dest/"
-
-$ cp-lite -v
-Exception in opt-parser: too few positional arguments with irritant "source"
-```
-
-* Both texts may have several lines, `"line one\nline two"`.
-* `--version` prints the program name and the version, then `(exit 0)`, like `-h` prints the usage.
-  It stops the parsing, so it needs neither the required options nor the positional words, and it
-  can be given after other words. After `--` it is an ordinary word.
-* The short name is `-V`, never `-v`: programs use `-v` for verbose.
-* When a version is given, `V` and `version` become reserved names, like `h` and `help`: an option or a
-  positional with that name is a syntax violation. Without a version the names are free, and
-  `--version` is an unknown option.
-* The usage lists `-V, --version` after `-h, --help`.
-
 # Reading the result
 
 `(parse arguments)` returns an accessor procedure, conventionally called `option`.
@@ -539,8 +469,7 @@ $ prog -s '\-v'                   ; the escape gives the word -v
 
 # Help
 
-`-h` and `--help` are always available. They print the usage table and `(exit 0)`. With a
-`:version` there are `-V` and `--version` too, see [Program text and version](#program-text-and-version).
+`-h` and `--help` are always available. They print the usage table and `(exit 0)`.
 Names, argument placeholders and descriptions are aligned, a multi-line description is indented
 under its first line.
 
@@ -760,9 +689,9 @@ The exported macro is just those two calls.
 |-------------------------------------|------------------------------------------------------------------------------|
 | `../command-line-options.sls`       | the exported macro: `(generate-definition parser options positional)`, from `(parse-options clauses)` |
 | `__parse.sls`                       | phase 1, read: walks the clauses and fields by pattern matching, builds records |
-| `__ast.sls`                         | the `option-ast`, `positional-ast` and `program-ast` records, and the semantic rules (names, arity, converter, duplicates) |
+| `__ast.sls`                         | the `option-ast` and `positional-ast` records, and the semantic rules (names, arity, converter, duplicates) |
 | `__codegen.sls`                     | phase 2, write: generates the definition, which builds the same records again at runtime; never reads user syntax |
-| `__keywords.sls`                    | the field keywords `:short :long :arity :type :choices :description :required :metavar :positional :program :epilog :version` |
+| `__keywords.sls`                    | the field keywords `:short :long :arity :type :choices :description :required :positional :metavar` |
 | `__runtime.sls`                      | the runtime: parses the command line, builds the accessor, prints the usage; the `&command-line-error` condition and `parse-or-exit`; the builtin converters |
 
 A converter is an object with a label for the usage and a conversion that raises its own error, so the

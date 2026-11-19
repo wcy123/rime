@@ -23,8 +23,8 @@
           procedure->converter
           make-converter
           converter-label
-          converter-convert
           converter-choices
+          converter-convert
           convert-bool
           convert-int
           convert-float
@@ -34,10 +34,6 @@
 
   (define help-spec
     (make-option-ast "-h" "--help" 0 0 #f "show this help message and exit" #f #f))
-
-  ;; the built-in -V and --version, listed in the usage when the program has a version
-  (define version-spec
-    (make-option-ast "-V" "--version" 0 0 #f "show the version and exit" #f #f))
 
   ;; ========================================
   ;; parsing the command line
@@ -50,63 +46,50 @@
   ;;   store-positional-words! convert them and put them in the table
   ;; parse-command-line calls them in this order and builds the accessor.
 
-  ;; (parse-command-line specs args [on-help [positionals [program]]]) => the accessor
+  ;; (parse-command-line specs args [on-help [positionals]]) => the accessor
   ;;   positionals: list of positional-ast, '() when the command line takes no positional words
-  ;;   program: the program-ast with the text of the usage and the version, #f when there is none
   (define parse-command-line
     (case-lambda
-      [(specs args) (parse-command-line specs args default-on-help '() #f)]
-      [(specs args on-help) (parse-command-line specs args on-help '() #f)]
-      [(specs args on-help positionals) (parse-command-line specs args on-help positionals #f)]
-      [(specs args on-help positionals program)
+      [(specs args) (parse-command-line specs args default-on-help '())]
+      [(specs args on-help) (parse-command-line specs args on-help '())]
+      [(specs args on-help positionals)
        ;; the library's own failures leave here with the usage of this parser attached
        (with-usage
-        (lambda () (format-usage specs (program-name) positionals program))
+        (lambda () (format-usage specs (program-name) positionals))
         (lambda ()
-          (let* ([version (and program (program-ast-version program))]
-                 ;; -V and --version are options like -h, for the arguments of the option before them
-                 [result (scan-tokens (if version (append specs (list version-spec)) specs)
-                                      (lambda () (on-help (format-usage specs (program-name) positionals program)))
-                                      (and version
-                                           (lambda () (on-help (string-append (program-name) " " version "\n"))))
+          (let* ([result (scan-tokens specs
+                                      (lambda () (on-help (format-usage specs (program-name) positionals)))
                                       args)]
                  [table (parse-result-table result)])
             (unless (parse-result-help-asked? result)
               (check-required specs table)
               (store-positional-words! table (distribute-words positionals (parse-result-words result))))
-            (make-accessor specs positionals table program))))]))
+            (make-accessor specs positionals table))))]))
 
   ;; table          option-ast or positional-ast -> the converted arguments, of what was given
   ;; words          the positional words, in order, the ones before -- unescaped
-  ;; help-asked?    #t when -h, --help or --version was met, the words after it are not read
+  ;; help-asked?    #t when -h or --help was met, the words after it are not read
   (define-record-type parse-result
     (fields table words help-asked?))
 
   ;; (scan-tokens specs show-help tokens) => parse-result
-  ;; (scan-tokens specs show-help show-version tokens) => parse-result
   ;; Options and positional words may come in any order. show-help is called, with no argument, at
-  ;; -h and --help. show-version is #f, or a procedure called with no argument at -V and --version.
-  (define scan-tokens
-    (case-lambda
-      [(specs show-help tokens) (scan-tokens specs show-help #f tokens)]
-      [(specs show-help show-version tokens)
-       (let ([table (make-eq-hashtable)])
-         (let loop ([tokens tokens] [words '()])
-           (cond
-            [(null? tokens)
-             (make-parse-result table (reverse words) #f)]
-            [(string=? (car tokens) "--")
-             (make-parse-result table (append (reverse words) (cdr tokens)) #f)]
-            [(member (car tokens) '("-h" "--help"))
-             (show-help)
-             (make-parse-result table (reverse words) #t)]
-            [(and show-version (member (car tokens) '("-V" "--version")))
-             (show-version)
-             (make-parse-result table (reverse words) #t)]
-            [(option-like? (car tokens) specs)
-             (loop (parse-option specs table (car tokens) (cdr tokens)) words)]
-            [else
-             (loop (cdr tokens) (cons (unescape (car tokens)) words))])))]))
+  ;; -h and --help.
+  (define (scan-tokens specs show-help tokens)
+    (let ([table (make-eq-hashtable)])
+      (let loop ([tokens tokens] [words '()])
+        (cond
+         [(null? tokens)
+          (make-parse-result table (reverse words) #f)]
+         [(string=? (car tokens) "--")
+          (make-parse-result table (append (reverse words) (cdr tokens)) #f)]
+         [(member (car tokens) '("-h" "--help"))
+          (show-help)
+          (make-parse-result table (reverse words) #t)]
+         [(option-like? (car tokens) specs)
+          (loop (parse-option specs table (car tokens) (cdr tokens)) words)]
+         [else
+          (loop (cdr tokens) (cons (unescape (car tokens)) words))]))))
 
   ;; token is "-x", "--long" or "-x=text" / "--long=text"; stores the option in the table and returns
   ;; the tokens that it did not take.
@@ -220,14 +203,14 @@
   ;; (option "count" 3) is the same, but it gives 3 when the option was not given on the command line:
   ;; the value is the program's own, it is not converted or checked. An option that was given with
   ;; no arguments, -o alone, was given, and a positional that got no words was not.
-  (define (make-accessor specs positionals table program)
+  (define (make-accessor specs positionals table)
     ;; default is `unbound` when the program gave none; any other value is its default, even #f
     (define (lookup key default)
       (if (or (string? key) (symbol? key))
           (let ([name (if (symbol? key) (symbol->string key) key)])
             (cond
              [(string=? name "help")
-              (format-usage specs (program-name) positionals program)]
+              (format-usage specs (program-name) positionals)]
              [(find-spec-by-name specs name)
               => (lambda (spec)
                    (if (and (not (unbound? default)) (not (hashtable-contains? table spec)))
@@ -302,27 +285,18 @@
   ;; usage
   ;; ========================================
 
-  ;; (format-usage specs program [positionals [info]]) => the usage text
-  ;;   info: the program-ast, #f when there is none; its description comes under the first line, its
-  ;;   epilog after the options, and with a version the options have -V, --version
+  ;; (format-usage specs program [positionals]) => the usage text
   (define format-usage
     (case-lambda
-      [(specs program) (format-usage specs program '() #f)]
-      [(specs program positionals) (format-usage specs program positionals #f)]
-      [(specs program positionals info)
-       (let* ([description (and info (program-ast-description info))]
-              [epilog (and info (program-ast-epilog info))]
-              [version (and info (program-ast-version info))]
-              [specs (append specs (list help-spec) (if version (list version-spec) '()))])
+      [(specs program) (format-usage specs program '())]
+      [(specs program positionals)
+       (let ([specs (append specs (list help-spec))])
          (string-append
           "Usage: " program " [options]"
           (if (null? positionals)
               ""
               (string-append " [--] " (join (map positional-placeholder positionals) " ")))
           "\n"
-          (if description
-              (string-append "\n" (end-with-newline description))
-              "")
           (if (null? positionals)
               ""
               (string-append
@@ -335,16 +309,7 @@
           "\n"
           "Options:\n"
           (format-rows (map (lambda (spec) (cons (flags spec) (usage-description spec)))
-                            specs))
-          (if epilog
-              (string-append "\n" (end-with-newline epilog))
-              "")))]))
-
-  (define (end-with-newline text)
-    (if (and (> (string-length text) 0)
-             (char=? (string-ref text (- (string-length text) 1)) #\newline))
-        text
-        (string-append text "\n")))
+                            specs))))]))
 
   ;; the description of an option in the usage. With a :metavar the converter's label is not shown,
   ;; so the choices of a :choices option go here: "output format (one of: json, text)"
@@ -471,9 +436,9 @@
   ;;   label    how an argument is shown in the usage: "<int>", "{json,text}"
   ;;   convert  (convert text option-name) => the value; when the text does not suit, it raises the
   ;;            error the user sees, so each kind of converter has its own failure
-  ;; The runtime only uses these two, it does not know which kinds of converter there are.
   ;;   choices  the texts of the choices of a :choices converter, #f for any other; the usage lists
   ;;            them when the option has a :metavar and so does not show the label
+  ;; The runtime only uses these, it does not know which kinds of converter there are.
   (define-record-type converter
     (fields label convert (mutable choices))
     (protocol

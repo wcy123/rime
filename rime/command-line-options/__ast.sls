@@ -25,17 +25,6 @@
           option-ast-metavar-set-if-not-given-yet!
           option-ast-with-metavar
           option-ast?
-          make-program-ast
-          make-unbound-program-ast
-          program-ast?
-          program-ast-description
-          program-ast-epilog
-          program-ast-version
-          program-ast-source
-          program-ast-description-set-if-not-given-yet!
-          program-ast-epilog-set-if-not-given-yet!
-          program-ast-version-set-if-not-given-yet!
-          program-ast-fill-defaults!
           option-lookup-names
           make-positional-ast
           make-unbound-positional-ast
@@ -57,8 +46,7 @@
           unbound?
           option-ast-fill-defaults!
           check-options
-          check-positionals
-          check-programs)
+          check-positionals)
   (import (rnrs (6))
           (for (rnrs (6)) expand))
 
@@ -271,68 +259,6 @@
       (if (and (< i count) (< i (string-length name)) (char=? (string-ref name i) #\-))
           (loop (+ i 1))
           (substring name i (string-length name)))))
-
-  ;; The :program clause: what the program says about itself.
-  ;; description  string shown under the first line of the usage, or #f
-  ;; epilog       string shown after the options, or #f
-  ;; version      string, or #f; when it is given the program has --version and -V
-  ;; source       as for an option
-  ;; While the clause is being read the fields it has not given yet are `unbound`, as for an option.
-  (define-record-type program-ast
-    (fields (mutable description)
-            (mutable epilog)
-            (mutable version)
-            source))
-
-  (define (make-unbound-program-ast source)
-    (make-program-ast unbound unbound unbound source))
-
-  (define (program-ast-description-set-if-not-given-yet! program value on-duplicate)
-    (if (unbound? (program-ast-description program))
-        (program-ast-description-set! program value)
-        (on-duplicate)))
-
-  (define (program-ast-epilog-set-if-not-given-yet! program value on-duplicate)
-    (if (unbound? (program-ast-epilog program))
-        (program-ast-epilog-set! program value)
-        (on-duplicate)))
-
-  (define (program-ast-version-set-if-not-given-yet! program value on-duplicate)
-    (if (unbound? (program-ast-version program))
-        (program-ast-version-set! program value)
-        (on-duplicate)))
-
-  ;; the defaults: nothing to say
-  (define (program-ast-fill-defaults! program)
-    (program-ast-description-set-if-not-given-yet! program #f ignore)
-    (program-ast-epilog-set-if-not-given-yet! program #f ignore)
-    (program-ast-version-set-if-not-given-yet! program #f ignore))
-
-  (define version-names '("V" "version"))
-
-  (define version-reserved-message "-V and --version are reserved for the built-in version")
-
-  ;; the rules for the :program clauses (there may be none, and there may be one): the version is
-  ;; not empty, and when there is a version the names of --version and -V are not taken
-  (define (check-programs programs options positionals report)
-    (for-each
-     (lambda (program)
-       (when (and (string? (program-ast-version program)) (string=? (program-ast-version program) ""))
-         (report ":version must not be empty" (program-ast-source program))))
-     programs)
-    (when (and (pair? programs) (pair? (cdr programs)))
-      (report "only one :program clause is allowed" (program-ast-source (cadr programs))))
-    (when (and (pair? programs) (program-ast-version (car programs)))
-      (for-each
-       (lambda (option)
-         (when (exists (lambda (name) (member name version-names)) (option-lookup-names option))
-           (report version-reserved-message (option-ast-source option))))
-       options)
-      (for-each
-       (lambda (positional)
-         (when (member (positional-ast-name positional) version-names)
-           (report version-reserved-message (positional-ast-source positional))))
-       positionals)))
 
   ;; the rules for the :positional clauses, in the order they were written, and for how their names
   ;; relate to the options: the names are unique, and at most one positional takes a variable number

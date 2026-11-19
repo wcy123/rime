@@ -2,8 +2,7 @@
 (library (rime command-line-options)
   (export define-command-line-options
           parse-or-exit command-line-error? command-line-error-usage
-          :short :long :arity :type :choices :description :required :positional
-          :metavar :program :epilog :version)
+          :short :long :arity :type :choices :description :required :positional :metavar)
   (import (rnrs (6))
           (for (rnrs (6)) expand)
           (for (rime command-line-options __parse) expand)
@@ -15,10 +14,8 @@
   ;; (define-command-line-options parser clause ...)
   ;;   clause = [field ...]
   ;;   field  = :short name | :long name | :arity n | (min max) | (min +) | :type type
-  ;;          | :choices (literal ...) | :description "text" | :required | :metavar name
+  ;;          | :choices (literal ...) | :description "text" | :required
   ;;   a clause with :positional name describes positional words: [:positional name field ...]
-  ;;   a clause with :program describes the program, at most one:
-  ;;     [:program :description "text" :epilog "text" :version "1.2.3"]
   ;;   name   = "-x" or -x, "--long" or --long; a clause needs a :short or a :long
   ;; defines (parser arguments [on-help]) => accessor procedure; on-help takes the usage text and
   ;; replaces the printing and the (exit 0) of -h; (parse-or-exit parser arguments) exits with 2 on a
@@ -31,8 +28,8 @@
       (syntax-case stx ()
         [(_ parser clause ...)
          (identifier? #'parser)
-         (let-values ([(options positionals program) (parse-options #'(clause ...))])
-           (generate-definition #'parser options positionals program))]
+         (let-values ([(options positionals) (parse-options #'(clause ...))])
+           (generate-definition #'parser options positionals))]
         [_ (syntax-violation 'define-command-line-options
                              "expected (define-command-line-options name clause ...)"
                              stx)]))))

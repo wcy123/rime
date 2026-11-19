@@ -13,13 +13,12 @@
           (only (rime command-line-options __runtime)
                 builtin-converters builtin-converter make-choice-converter procedure->converter))
 
-  ;; (parse-options clauses) => (values options positionals program)
+  ;; (parse-options clauses) => (values options positionals)
   ;;   input   clauses: the syntax of `clause ...` in (define-command-line-options parser clause ...),
   ;;           exactly as the user wrote them
   ;;   output  options: one option-ast per option clause, in the same order, already checked
   ;;           (fields: see __ast.sls)
   ;;           positionals: one positional-ast per :positional clause, in the same order
-  ;;           program: the program-ast of the :program clause, #f when there is none
   ;;   errors  a syntax violation, at the clause or at the offending part of it
   ;;
   ;;   (parse-options #'([:short "-v" :arity 0 :description "verbose"]
@@ -41,15 +40,13 @@
     (let* ([asts (read-clauses clauses)]
            [options (filter option-ast? asts)]
            [positionals (filter positional-ast? asts)]
-           [programs (filter program-ast? asts)]
            [report (lambda (message source) (violation message source))])
       (check-options options report)
       (check-positionals positionals options report)
-      (check-programs programs options positionals report)
-      (values options positionals (if (null? programs) #f (car programs)))))
+      (values options positionals)))
 
-  ;; the clauses, one after the other -> list of option-ast, positional-ast and program-ast in the
-  ;; same order, not yet checked
+  ;; the clauses, one after the other -> list of option-ast and positional-ast in the same order,
+  ;; not yet checked
   ;;   (read-clauses #'(c1 c2 c3)) = (list (read-clause #'c1) (read-clause #'c2) (read-clause #'c3))
   (define (read-clauses clauses)
     (syntax-case clauses ()
@@ -71,13 +68,11 @@
   ;;   [:short 42]        => violation: :short name must be a string or a symbol
   ;; Whether the option has a name at all is a semantic rule, checked later (__ast.sls).
   (define (read-clause clause)
-    (cond
-     [(positional-clause? clause) (read-positional-clause clause)]
-     [(program-clause? clause) (read-program-clause clause)]
-     [else
-      (let ([option (read-fields clause (make-unbound-option-ast clause))])
-        (option-ast-fill-defaults! option)
-        option)]))
+    (if (positional-clause? clause)
+        (read-positional-clause clause)
+        (let ([option (read-fields clause (make-unbound-option-ast clause))])
+          (option-ast-fill-defaults! option)
+          option)))
 
   ;; a clause is a :positional clause when the keyword is in it, in any place
   (define (positional-clause? clause)
@@ -86,53 +81,6 @@
       [(:positional . _) #t]
       [(_ . rest) (positional-clause? #'rest)]
       [_ #f]))
-
-  ;; a clause is a :program clause when the keyword is in it, in any place
-  (define (program-clause? clause)
-    (syntax-case clause (:program)
-      [() #f]
-      [(:program . _) #t]
-      [(_ . rest) (program-clause? #'rest)]
-      [_ #f]))
-
-  ;; (read-program-clause clause) => program-ast
-  ;;   clause = [:program :description "Copy files." :epilog "Example: cp a b" :version "1.2.3"]
-  ;;   => description "Copy files.", epilog "Example: cp a b", version "1.2.3"; what is not given is #f
-  ;;   The :program keyword has no value, it says which clause this is. The other fields are
-  ;;   :description, :epilog and :version, strings, in any order.
-  (define (read-program-clause clause)
-    (let ([program (read-program-fields clause (make-unbound-program-ast clause) #f)])
-      (program-ast-fill-defaults! program)
-      program))
-
-  ;; program-seen? is #t once the :program keyword has been read, a second one is a duplicate
-  (define (read-program-fields fields program program-seen?)
-    (syntax-case fields (:program :description :epilog :version)
-      [() program]
-      [(:program . rest)
-       (begin
-         (when program-seen?
-           (violation "duplicate field" fields))
-         (read-program-fields #'rest program #t))]
-      [(:description value . rest)
-       (begin
-         (program-ast-description-set-if-not-given-yet!
-          program (read-description #'value) (duplicate #'value))
-         (read-program-fields #'rest program program-seen?))]
-      [(:epilog value . rest)
-       (begin
-         (program-ast-epilog-set-if-not-given-yet!
-          program (read-text #'value ":epilog") (duplicate #'value))
-         (read-program-fields #'rest program program-seen?))]
-      [(:version value . rest)
-       (begin
-         (program-ast-version-set-if-not-given-yet!
-          program (read-text #'value ":version") (duplicate #'value))
-         (read-program-fields #'rest program program-seen?))]
-      [(bad . _)
-       (violation "unknown field, or field without a value (expected :program :description :epilog :version)"
-                  #'bad)]
-      [_ (violation "a clause is a list of :key value pairs" fields)]))
 
   ;; (read-positional-clause clause) => positional-ast
   ;;   clause = [:positional "file" :arity (1 +) :type int :description "input files"]
@@ -316,13 +264,9 @@
             [else (violation "a choice must be a string or an integer" form)])))
 
   (define (read-description form)
-    (read-text form ":description"))
-
-  ;; a string, for :description, :epilog and :version
-  (define (read-text form what)
     (if (string? (syntax->datum form))
         (syntax->datum form)
-        (violation (string-append what " must be a string") form)))
+        (violation ":description must be a string" form)))
 
   (define (violation message form)
     (syntax-violation 'define-command-line-options message form)))
