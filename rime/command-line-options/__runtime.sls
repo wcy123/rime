@@ -14,6 +14,7 @@
           command-line-error?
           command-line-error-usage
           format-command-line-error
+          describe-problem
           format-usage
           program-name
           default-on-help
@@ -550,15 +551,57 @@
                (raise (command-line-condition (condition-message e) (condition-irritants e) (make-usage)))])
       (thunk)))
 
-  ;; "prog: message: detail ...", a blank line, and the usage; what parse-or-exit prints
+  ;; "prog: sentence", a blank line, and the usage; what parse-or-exit prints. The sentence is
+  ;; (describe-problem message details); a message that is not known is "message: detail ...".
   (define (format-command-line-error e)
     (string-append
-     (program-name) ": " (condition-message e)
-     (if (null? (condition-irritants e))
-         ""
-         (string-append ": " (join (map write->string (condition-irritants e)) " ")))
+     (program-name) ": "
+     (or (describe-problem (condition-message e) (condition-irritants e))
+         (string-append
+          (condition-message e)
+          (if (null? (condition-irritants e))
+              ""
+              (string-append ": " (join (map write->string (condition-irritants e)) " ")))))
      "\n\n"
      (or (command-line-error-usage e) "")))
+
+  ;; (describe-problem message details) => what a person reads, or #f when the message is not known or
+  ;; its details are not the ones it has. The condition keeps its message and details, this is only text.
+  ;;   (describe-problem "invalid argument value" '("-n" "abc"))  =>  invalid argument "abc" for -n
+  ;;   (describe-problem "missing required option" '("--input"))  =>  missing required option --input
+  (define (describe-problem message details)
+    (define (is? text) (string=? message text))
+    ;; a word as it was typed, quoted only when it is empty or has whitespace in it
+    (define (word w)
+      (if (and (string? w) (> (string-length w) 0) (not (exists char-whitespace? (string->list w))))
+          w
+          (write->string w)))
+    (define (words ws) (join (map word ws) " "))
+    (define (choice-text c) (if (string? c) c (number->string c)))
+    (define (all-strings? ds) (for-all string? ds))
+    (cond
+     [(and (is? "invalid argument value") (= 2 (length details)) (all-strings? details))
+      (string-append "invalid argument " (write->string (cadr details)) " for " (car details))]
+     [(and (is? "argument must be one of the choices") (= 3 (length details))
+           (string? (car details)) (string? (cadr details)) (list? (caddr details)))
+      (string-append (write->string (cadr details)) " is not one of "
+                     (join (map choice-text (caddr details)) ", ")
+                     " (for " (car details) ")")]
+     [(and (is? "too few arguments for option") (= 1 (length details)) (all-strings? details))
+      (string-append "too few arguments for " (car details))]
+     [(and (is? "option does not take arguments") (= 1 (length details)) (all-strings? details))
+      (string-append (car details) " does not take arguments")]
+     [(and (is? "missing required option") (= 1 (length details)) (all-strings? details))
+      (string-append "missing required option " (car details))]
+     [(and (is? "too few positional arguments") (= 1 (length details)) (all-strings? details))
+      (string-append "too few positional arguments, <" (car details) "> needs more")]
+     [(and (is? "too many positional arguments") (pair? details) (all-strings? details))
+      (string-append "too many positional arguments: " (words details))]
+     [(and (is? "unexpected positional argument") (pair? details) (all-strings? details))
+      (string-append "unexpected positional argument: " (words details))]
+     [(and (is? "unknown option") (= 1 (length details)) (all-strings? details))
+      (string-append "unknown option " (car details))]
+     [else #f]))
 
   (define (write->string datum)
     (call-with-string-output-port (lambda (port) (write datum port))))

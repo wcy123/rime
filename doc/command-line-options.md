@@ -603,12 +603,12 @@ the command line is wrong. A program that only wants the usual reaction uses `pa
 (define option (parse-or-exit parse (cdr (command-line))))
 ```
 
-It returns the accessor, and when the command line is wrong it prints the message, the details and
-the usage to the error port, and exits with `2`. Other errors are not caught.
+It returns the accessor, and when the command line is wrong it prints a sentence, a blank line and the
+usage to the error port, and exits with `2`. Other errors are not caught.
 
 ```
 $ copy -n abc -i a.txt
-copy: invalid argument value: "-n" "abc"
+copy: invalid argument "abc" for -n
 
 Usage: copy [options]
 
@@ -618,6 +618,24 @@ Options:
   -h, --help            show this help message and exit
 [exit 2]
 ```
+
+The sentence says which option and which text. The condition keeps its message and its details, which are
+what a program reads with `condition-message` and `condition-irritants`; the sentence is made only for
+`parse-or-exit` (and `format-command-line-error`, which gives the same text):
+
+| message | what a person reads, for example |
+|---|---|
+| `invalid argument value` | `invalid argument "abc" for -n` |
+| `argument must be one of the choices` | `"xml" is not one of json, text (for --format)` |
+| `too few arguments for option` | `too few arguments for -n` |
+| `option does not take arguments` | `--verbose does not take arguments` |
+| `missing required option` | `missing required option --input` |
+| `too few positional arguments` | `too few positional arguments, <dest> needs more` |
+| `too many positional arguments` | `too many positional arguments: b c` |
+| `unexpected positional argument` | `unexpected positional argument: a` |
+
+A word with a space in it is shown in quotes, and a message that the table does not know is printed as
+`message: detail ...`.
 
 A program that wants a different reaction catches the condition itself:
 
