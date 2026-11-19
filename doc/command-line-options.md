@@ -182,31 +182,60 @@ a syntax violation when the program is compiled.
 
 ## Positional arguments
 
-The words of the command line that are not options are described by one `:positional` clause.
-There is at most one. It has a name, and the fields of an option that make sense for words:
-`:arity`, `:type`, `:choices` and `:description`.
+The words of the command line that are not options are described by `:positional` clauses, one
+for each part of the command line, in the order they are written. A clause has a name, and the
+fields of an option that make sense for words: `:arity`, `:type`, `:choices` and `:description`.
 
 ```scheme
+#!r6rs
+(import (rnrs (6)) (rime command-line-options))
+
 (define-command-line-options parse
   [:short "-v" :arity 0 :description "verbose"]
-  [:positional "file" :arity (1 +) :description "files to read"])
+  [:positional "source" :arity (1 +) :description "files to copy"]
+  [:positional "dest" :description "where to copy them"])
+
+(define option (parse (cdr (command-line))))
+(write (option "source")) (newline)
+(write (option "dest")) (newline)
 ```
 
-* The name is how the program reads them, `(option "file")`, and what the usage shows, `<file>`.
-  It must not start with `-`, and it must be different from the names of the options.
-* `:arity` is how many words there are, `1` when it is not given. The parser raises
-  `too few positional arguments` or `too many positional arguments` (see [Errors](#errors)) when
-  the number is not right. A positional cannot have arity `0`.
+```
+$ cp-lite a b c
+("a" "b")
+"c"
+
+$ cp-lite -v a b
+("a")
+"b"
+
+$ cp-lite a
+Exception in opt-parser: too few positional arguments with irritant "dest"
+
+$ cp-lite
+Exception in opt-parser: too few positional arguments with irritant "source"
+```
+
+* The name is how the program reads the words, `(option "dest")`, and what the usage shows, `<dest>`.
+  It must not start with `-`, it must be different from the other positionals, and from the names of
+  the options.
+* `:arity` is how many words the positional takes, `1` when it is not given. A positional cannot
+  have arity `0`. The value follows the same rule as an option: with arity `1` the word itself,
+  with any other arity the list of words.
 * `:type` and `:choices` convert each word like they do for an option.
 * `:short`, `:long` and `:required` are for options, they are a syntax violation in this clause.
   A positional is required when its minimum is 1 or more.
+* The words are shared out to the positionals in the order of the clauses. At most one positional
+  takes a variable number of words (its minimum is less than its maximum), all the others have an exact
+  arity. Each gets its exact number of words, and the variable one gets the words that are left.
+  So the words can only be shared out in one way, and `(0 1)` next to `(1 +)` is a syntax
+  violation instead of a guess. In the example, `source` is `(1 +)` and `dest` is `1`, so `dest`
+  is always the last word.
+* When there are not enough words, the error names the first positional that lacks words
+  (`too few positional arguments`). When there are too many, the error gives the words that no
+  positional takes (`too many positional arguments`). A variable positional with `+` never has too many.
 * Without a `:positional` clause the command line takes no positional words, and a word that is
   not an option raises `unexpected positional argument`.
-
-```
-prog -v a.txt b.txt           ; (option "file") => ("a.txt" "b.txt")
-prog                          ; too few positional arguments
-```
 
 How the words are given on the command line is in [Command line syntax](#command-line-syntax).
 
@@ -217,7 +246,7 @@ How the words are given on the command line is in [Command line syntax](#command
 | call                                    | result                                                      |
 |-----------------------------------------|-------------------------------------------------------------|
 | `(option "name")`                       | the value of the option, by its short or long name without the dashes |
-| `(option "file")`                       | the words of the `:positional` clause, by its name          |
+| `(option "file")`                       | the words of a `:positional` clause, by its name            |
 | `(option "help")`                       | the usage text, as a string, the same text that `--help` prints |
 
 Symbols work as names as well, `(option 'name)`. Names that were not defined, with the dashes
@@ -258,7 +287,7 @@ prog --exclude=a,b,c          ; several arguments with =, separated by commas
 
 Options and positional words can come in any order. A word that is an option is an option wherever it
 is, and a word that is not (and is not consumed as an argument of an option) is positional.
-The positional words keep their order, and go to the `:positional` clause, see
+The positional words keep their order, and go to the `:positional` clauses, see
 [Positional arguments](#positional-arguments).
 `--` ends option parsing explicitly, everything after it is positional and kept as is, and
 the `--` itself is dropped.
@@ -336,8 +365,8 @@ Catch it with `guard`; the library never exits by itself except for `-h`.
 | `invalid argument value`           | the conversion failed                                 | the option name, the text |
 | `argument must be one of the choices` | the argument is not one of the `:choices`          | the option name, the text, the choices |
 | `missing required option`          | a `:required` option is absent                        | the long name, or the short name when there is no long one |
-| `too few positional arguments`     | fewer words than the `:positional` minimum            | the name of the positional |
-| `too many positional arguments`    | more words than the `:positional` maximum             | the extra words        |
+| `too few positional arguments`     | fewer words than the `:positional` minimums           | the name of the first positional that lacks words |
+| `too many positional arguments`    | more words than the `:positional` maximums            | the words that no positional takes |
 | `unexpected positional argument`   | a word that is not an option, and no `:positional` clause | the words          |
 
 ```scheme

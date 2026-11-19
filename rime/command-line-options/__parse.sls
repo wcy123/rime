@@ -13,12 +13,12 @@
           (only (rime command-line-options __runtime)
                 builtin-converters builtin-converter make-choice-converter procedure->converter))
 
-  ;; (parse-options clauses) => (values options positional)
+  ;; (parse-options clauses) => (values options positionals)
   ;;   input   clauses: the syntax of `clause ...` in (define-command-line-options parser clause ...),
   ;;           exactly as the user wrote them
   ;;   output  options: one option-ast per option clause, in the same order, already checked
   ;;           (fields: see __ast.sls)
-  ;;           positional: the positional-ast of the :positional clause, #f when there is none
+  ;;           positionals: one positional-ast per :positional clause, in the same order
   ;;   errors  a syntax violation, at the clause or at the offending part of it
   ;;
   ;;   (parse-options #'([:short "-v" :arity 0 :description "verbose"]
@@ -43,7 +43,7 @@
            [report (lambda (message source) (violation message source))])
       (check-options options report)
       (check-positionals positionals options report)
-      (values options (if (null? positionals) #f (car positionals)))))
+      (values options positionals)))
 
   ;; the clauses, one after the other -> list of option-ast and positional-ast in the same order,
   ;; not yet checked

@@ -12,7 +12,7 @@
   ;;   clause = [field ...]
   ;;   field  = :short name | :long name | :arity n | (min max) | (min +) | :type type
   ;;          | :choices (literal ...) | :description "text" | :required
-  ;;   a clause with :positional name describes the positional words, at most one: [:positional name field ...]
+  ;;   a clause with :positional name describes positional words: [:positional name field ...]
   ;;   name   = "-x" or -x, "--long" or --long; a clause needs a :short or a :long
   ;; defines (parser arguments) => accessor procedure
   ;;
@@ -23,8 +23,8 @@
       (syntax-case stx ()
         [(_ parser clause ...)
          (identifier? #'parser)
-         (let-values ([(options positional) (parse-options #'(clause ...))])
-           (generate-definition #'parser options positional))]
+         (let-values ([(options positionals) (parse-options #'(clause ...))])
+           (generate-definition #'parser options positionals))]
         [_ (syntax-violation 'define-command-line-options
                              "expected (define-command-line-options name clause ...)"
                              stx)]))))

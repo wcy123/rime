@@ -28,13 +28,13 @@
   ;; parsing the command line
   ;; ========================================
 
-  ;; (parse-command-line specs args [on-help [positional]]) => the accessor
-  ;;   positional: the positional-ast, or #f when the command line takes no positional words
+  ;; (parse-command-line specs args [on-help [positionals]]) => the accessor
+  ;;   positionals: list of positional-ast, '() when the command line takes no positional words
   (define parse-command-line
     (case-lambda
-      [(specs args) (parse-command-line specs args default-on-help #f)]
-      [(specs args on-help) (parse-command-line specs args on-help #f)]
-      [(specs args on-help positional)
+      [(specs args) (parse-command-line specs args default-on-help '())]
+      [(specs args on-help) (parse-command-line specs args on-help '())]
+      [(specs args on-help positionals)
        (let ([table (make-eq-hashtable)])   ; option -> the converted arguments
 
          (define help-asked? #f)
@@ -46,7 +46,7 @@
             [(string=? (car tokens) "--") (cdr tokens)]
             [(member (car tokens) '("-h" "--help"))
              (set! help-asked? #t)
-             (on-help (format-usage specs (program-name) positional))
+             (on-help (format-usage specs (program-name) positionals))
              '()]
             [(option-like? (car tokens))
              (scan (parse-option (car tokens) (cdr tokens)))]
@@ -93,28 +93,51 @@
            (let ([convert (converter-convert (spec-converter spec))])
              (map (lambda (item) (convert (unescape item) name)) items)))
 
-         ;; the words that are not options go to the :positional clause, or are an error
+         ;; The words that are not options are shared out to the positionals, in order. Each gets as
+         ;; many as its minimum, and the one that takes a variable number of words (there is at most
+         ;; one) also gets the words that are left over. Without a positional they are an error.
          (define (take-positional-words! words)
-           (cond
-            [positional
-             (let ([count (length words)])
-               (when (< count (positional-ast-min positional))
-                 (fail "too few positional arguments" (positional-ast-name positional)))
-               (when (> count (positional-ast-max positional))
-                 (apply fail "too many positional arguments"
-                        (list-tail words (positional-ast-max positional))))
-               (let ([convert (converter-convert (spec-converter positional))])
-                 (hashtable-set! table positional
-                                 (map (lambda (word) (convert word (positional-ast-name positional)))
-                                      words))))]
-            [(pair? words)
-             (apply fail "unexpected positional argument" words)]))
+           (if (null? positionals)
+               (when (pair? words)
+                 (apply fail "unexpected positional argument" words))
+               (let* ([count (length words)]
+                      [minimum (sum (map positional-ast-min positionals))]
+                      [maximum (sum (map positional-ast-max positionals))])
+                 (check-enough-words positionals count)
+                 (when (> count maximum)
+                   (apply fail "too many positional arguments" (list-tail words maximum)))
+                 (let loop ([positionals positionals] [words words])
+                   (unless (null? positionals)
+                     (let* ([positional (car positionals)]
+                            [own (if (= (positional-ast-min positional) (positional-ast-max positional))
+                                     (positional-ast-min positional)
+                                     (+ (positional-ast-min positional) (- count minimum)))]
+                            [convert (converter-convert (spec-converter positional))])
+                       (hashtable-set! table positional
+                                       (map (lambda (word) (convert word (positional-ast-name positional)))
+                                            (list-head words own)))
+                       (loop (cdr positionals) (list-tail words own))))))))
 
          (let ([words (scan args)])
            (unless help-asked?
              (check-required specs table)
              (take-positional-words! words))
-           (make-accessor specs positional table)))]))
+           (make-accessor specs positionals table)))]))
+
+  ;; every positional needs its minimum, the first one that lacks words is the one to blame
+  (define (check-enough-words positionals count)
+    (let loop ([positionals positionals] [left count])
+      (unless (null? positionals)
+        (when (< left (positional-ast-min (car positionals)))
+          (fail "too few positional arguments" (positional-ast-name (car positionals))))
+        (loop (cdr positionals) (- left (positional-ast-min (car positionals)))))))
+
+  (define (sum numbers) (apply + numbers))
+
+  (define (list-head list count)
+    (if (= count 0)
+        '()
+        (cons (car list) (list-head (cdr list) (- count 1)))))
 
   ;; the first required option that was not given is an error; the long name is the one to show
   (define (check-required specs table)
@@ -130,19 +153,20 @@
 
   ;; the procedure the user gets: (option "count"), (option "file"), (option "help"); the names are
   ;; those of the options without their dashes, the name of the positional, and "help" for the usage
-  (define (make-accessor specs positional table)
+  (define (make-accessor specs positionals table)
     (lambda (key)
       (if (or (string? key) (symbol? key))
           (let ([name (if (symbol? key) (symbol->string key) key)])
             (cond
              [(string=? name "help")
-              (format-usage specs (program-name) positional)]
+              (format-usage specs (program-name) positionals)]
              [(find-spec-by-name specs name)
               => (lambda (spec)
                    (value-of (option-ast-min spec) (option-ast-max spec) (hashtable-ref table spec #f)))]
-             [(and positional (string=? name (positional-ast-name positional)))
-              (value-of (positional-ast-min positional) (positional-ast-max positional)
-                        (hashtable-ref table positional #f))]
+             [(find-positional positionals name)
+              => (lambda (positional)
+                   (value-of (positional-ast-min positional) (positional-ast-max positional)
+                             (hashtable-ref table positional #f)))]
              [else (fail "unknown option" key)]))
           (fail "invalid option key" key))))
 
@@ -163,6 +187,12 @@
              (car specs)]
             [else (loop (cdr specs))])))
 
+  (define (find-positional positionals name)
+    (let loop ([positionals positionals])
+      (cond [(null? positionals) #f]
+            [(string=? (positional-ast-name (car positionals)) name) (car positionals)]
+            [else (loop (cdr positionals))])))
+
   ;; "n" or "count", the name without the dashes
   (define (find-spec-by-name specs name)
     (let loop ([specs specs])
@@ -180,23 +210,27 @@
   ;; usage
   ;; ========================================
 
-  ;; (format-usage specs program [positional]) => the usage text
+  ;; (format-usage specs program [positionals]) => the usage text
   (define format-usage
     (case-lambda
-      [(specs program) (format-usage specs program #f)]
-      [(specs program positional)
+      [(specs program) (format-usage specs program '())]
+      [(specs program positionals)
        (let ([specs (append specs (list help-spec))])
          (string-append
           "Usage: " program " [options]"
-          (if positional (string-append " [--] " (positional-placeholder positional)) "")
+          (if (null? positionals)
+              ""
+              (string-append " [--] " (join (map positional-placeholder positionals) " ")))
           "\n"
-          (if positional
+          (if (null? positionals)
+              ""
               (string-append
                "\n"
                "Arguments:\n"
-               (format-rows (list (cons (positional-placeholder positional)
-                                       (positional-ast-description positional)))))
-              "")
+               (format-rows (map (lambda (positional)
+                                   (cons (positional-placeholder positional)
+                                         (positional-ast-description positional)))
+                                 positionals))))
           "\n"
           "Options:\n"
           (format-rows (map (lambda (spec) (cons (flags spec) (option-ast-description spec)))

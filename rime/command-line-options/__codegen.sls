@@ -9,15 +9,15 @@
           (rime command-line-options __runtime))
 
   ;; parser: the identifier to define; options: list of option-ast;
-  ;; positional: the positional-ast, or #f when there is none
-  (define (generate-definition parser options positional)
+  ;; positionals: list of positional-ast, in the order of the clauses
+  (define (generate-definition parser options positionals)
     (with-syntax ([parser parser]
                   [(spec ...) (map option->spec-expression options)]
-                  [positional (if positional (positional->expression positional) #'#f)])
+                  [(positional ...) (map positional->expression positionals)])
       #'(define parser
           (let ([specs (list spec ...)])
             (lambda (arguments)
-              (parse-command-line specs arguments default-on-help positional))))))
+              (parse-command-line specs arguments default-on-help (list positional ...)))))))
 
   ;; the same for the positional-ast
   (define (positional->expression positional)

@@ -247,12 +247,23 @@
           (loop (+ i 1))
           (substring name i (string-length name)))))
 
-  ;; the rules for the :positional clauses (there may be none, and there may be one) and for how
-  ;; their names relate to the options
+  ;; the rules for the :positional clauses, in the order they were written, and for how their names
+  ;; relate to the options: the names are unique, and at most one positional takes a variable number
+  ;; of words (min < max), so that the words can only be shared out in one way
   (define (check-positionals positionals options report)
     (for-each (lambda (positional) (check-positional positional options report)) positionals)
-    (when (and (pair? positionals) (pair? (cdr positionals)))
-      (report "only one :positional clause is allowed" (positional-ast-source (cadr positionals)))))
+    (let loop ([rest positionals] [names '()] [variable-seen? #f])
+      (unless (null? rest)
+        (let* ([positional (car rest)]
+               [variable? (not (eqv? (positional-ast-min positional) (positional-ast-max positional)))])
+          (when (member (positional-ast-name positional) names)
+            (report "positional name is defined twice" (positional-ast-source positional)))
+          (when (and variable? variable-seen?)
+            (report "only one positional argument can take a variable number of words, the others need an exact arity"
+                    (positional-ast-source positional)))
+          (loop (cdr rest)
+                (cons (positional-ast-name positional) names)
+                (or variable? variable-seen?))))))
 
   (define (check-positional positional options report)
     (define (problem message) (report message (positional-ast-source positional)))
