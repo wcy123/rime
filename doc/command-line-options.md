@@ -419,9 +419,10 @@ An option given twice keeps its last occurrence.
 ## Words that start with `-`
 
 A word is an option only when it is the name of an option that the program defines (`-n`, `--count`,
-`--count=3`), or `-h` and `--help`. Every other word is an ordinary word, whatever it starts with: a
-positional word, or the argument of the option before it. This covers negative numbers (`-5`,
-`-1.5`) and any other word that is not defined (`-z`, `--typo`).
+`--count=3`), or `-h` and `--help`. Every other word is an ordinary word, a positional word or the argument
+of the option before it, with one exception: an undefined word that starts with `--` is a mistyped option,
+and it is an error, `unknown option`. So negative numbers (`-5`, `-1.5`) and any other word with a single
+dash that is not defined (`-z`) are ordinary words, and `--verbos` is an error.
 
 ```
 $ prog -n -5 -x -1.5              ; a number is an ordinary word
@@ -431,8 +432,8 @@ $ prog -n -5 -x -1.5              ; a number is an ordinary word
 $ prog -z file                    ; -z is not defined: a positional word
 "file" => ("-z" "file")
 
-$ prog --verbos file              ; a typo is a positional word too
-"file" => ("--verbos" "file")
+$ prog --verbos file              ; a mistyped long option is an error
+Exception in opt-parser: unknown option with irritant "--verbos"
 
 $ prog -n -v                      ; -v is defined, so it is an option
 Exception in opt-parser: too few arguments for option with irritant "-n"
@@ -440,23 +441,29 @@ Exception in opt-parser: too few arguments for option with irritant "-n"
 $ prog -s -z                      ; an undefined word is the argument
 "name" => "-z"
 
-$ prog -- -v                      ; after -- everything is a word
-"file" => ("-v")
+$ prog -s --verbos                ; -s stops at a mistyped long option
+Exception in opt-parser: too few arguments for option with irritant "-s"
 
-$ prog -s=-v                      ; after = anything is the argument
-"name" => "-v"
+$ prog -- --verbos                ; after -- everything is a word
+"file" => ("--verbos")
 
-$ prog -s '\-v'                   ; the escape gives the word -v
-"name" => "-v"
+$ prog -s=--verbos                ; after = anything is the argument
+"name" => "--verbos"
+
+$ prog -s '\--verbos'             ; the escape gives the word --verbos
+"name" => "--verbos"
 ```
 
+* A word with a single dash is not checked, because it can be a negative number, a value, or just a name that is
+  not defined. A mistyped short option (`-z`) is an ordinary word, so with a `:positional` clause that takes any
+  number of words it becomes one of them. A program that declares no positional word rejects it,
+  `unexpected positional argument`.
 * An option that has the name of a value cannot be given as that value: if the program defines
   `[:short "-5"]`, `-5` is that option. Give the word after `--`, after `=` (`--name=-5`), or with the
   escape `\-5`, which is the word `-5`. The backslash has to survive the shell: write `'\-5'` or `\\-5`.
-* A mistyped option is not an error, it is a word. With a `:positional` clause that takes any
-  number of words it becomes one of them (`--verbos file` above), and an option before it takes it as an
-  argument when it takes a variable number of them. A program that declares no positional word
-  rejects it, `unexpected positional argument`.
+* To give a value that starts with `--`, write it after `--`, after `=`, or with the escape (`'\--x'`).
+* An option that takes arguments stops at a mistyped long option, as it stops at an option name, so
+  `-s --verbos` is `too few arguments for option`.
 * A lone `-` is a word, not an option, and so is any word after `--`.
 
 # Help
@@ -517,6 +524,7 @@ for the details) work on it. The library never exits by itself except for `-h`, 
 
 | message                            | when                                                  | details                |
 |------------------------------------|-------------------------------------------------------|------------------------|
+| `unknown option`                   | a word that starts with `--` and is not a defined option | the word               |
 | `too few arguments for option`     | fewer than `min` arguments, also `--name=x` for an option that needs two or more | the option name        |
 | `option does not take arguments`   | `--flag=1` on an arity 0 option                       | the option name        |
 | `invalid argument value`           | the conversion failed                                 | the option name, the text |
@@ -560,8 +568,9 @@ A program that wants a different reaction catches the condition itself:
     (parse (cdr (command-line)))))
 ```
 
-The accessor raises `unknown option` for names that were not defined (also a name with its dashes);
-the parser never does, a word that is not a defined option is an ordinary word.
+The accessor raises `unknown option` for names that were not defined (also a name with its dashes).
+(The parser raises it too, for a mistyped long option, see
+[Words that start with `-`](#words-that-start-with--); that one is a command-line error.)
 The accessor raises `invalid option key` for anything that is not a string or a symbol. `unknown option`
 carries the name as it was given, and then a hint about what to do: for a name that starts with a dash,
 the text `names are read without the dashes`, and for any other name, the list of the names that exist

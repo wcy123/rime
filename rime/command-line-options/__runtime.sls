@@ -87,6 +87,8 @@
           (make-parse-result table (reverse words) #t)]
          [(option-like? (car tokens) specs)
           (loop (parse-option specs table (car tokens) (cdr tokens)) words)]
+         [(unknown-long-option? (car tokens) specs)
+          (fail "unknown option" (car tokens))]
          [else
           (loop (cdr tokens) (cons (unescape (car tokens)) words))]))))
 
@@ -122,7 +124,7 @@
           (values (reverse taken) tokens))))
 
   (define (argument-token? token specs)
-    (not (or (string=? token "--") (option-like? token specs))))
+    (not (or (string=? token "--") (option-like? token specs) (unknown-long-option? token specs))))
 
   (define (store! table spec name items)
     (hashtable-set! table spec (convert-items spec name items)))
@@ -402,6 +404,15 @@
     (let ([equals (index-of #\= token)])
       (or (and (member token '("-h" "--help")) #t)
           (and (find-spec-by-token specs (if equals (substring token 0 equals) token)) #t))))
+
+  ;; A word that starts with -- and is not the name of a defined option is a mistyped option, an error.
+  ;; A word with a single dash is not checked: it can be a negative number, a value, or a name that is
+  ;; not defined. To give a value that starts with --, write it after --, after =, or with the escape.
+  (define (unknown-long-option? token specs)
+    (and (> (string-length token) 2)
+         (char=? (string-ref token 0) #\-)
+         (char=? (string-ref token 1) #\-)
+         (not (option-like? token specs))))
 
   ;; "\-x" is the way to pass "-x" as a value
   (define (unescape token)
