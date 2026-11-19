@@ -15,33 +15,41 @@
 
   ;; the generated definition, as a datum
   (define (generate parser . options)
-    (syntax->datum (generate-definition parser options #f)))
+    (syntax->datum (generate-definition parser options '())))
 
   ;; what the definition looks like around the list of specs
   (define (definition parser . specs)
-    (definition-with-positional parser #f specs))
+    (definition-with-positional parser '() specs))
 
-  (define (definition-with-positional parser positional specs)
+  (define (definition-with-positional parser positionals specs)
     `(define ,parser
        (let ([specs (list ,@specs)])
          (lambda (arguments)
-           (parse-command-line specs arguments default-on-help ,positional)))))
+           (parse-command-line specs arguments default-on-help (list ,@positionals))))))
 
   (define-test test-required-is-emitted
     (CHECK equal?
            (syntax->datum
-            (generate-definition #'p (list (make-option-ast "-a" #f 1 1 #f "" #f #t)) #f))
+            (generate-definition #'p (list (make-option-ast "-a" #f 1 1 #f "" #f #t)) '()))
            (definition 'p '(make-option-ast "-a" #f 1 1 #f "" #f #t))))
 
-  (define-test test-positional-is-emitted
+  (define-test test-positionals-are-emitted-in-order
     (CHECK equal?
            (syntax->datum
             (generate-definition #'p (list (make-option-ast "-a" #f 1 1 #f "" #f #f))
-                                 (make-positional-ast "file" 1 unlimited #'(builtin-converter 'int) "files" #f)))
+                                 (list (make-positional-ast "src" 1 unlimited #'(builtin-converter 'int) "files" #f)
+                                       (make-positional-ast "dest" 1 1 #f "" #f))))
            (definition-with-positional
              'p
-             `(make-positional-ast "file" 1 ,unlimited (builtin-converter 'int) "files" #f)
+             (list `(make-positional-ast "src" 1 ,unlimited (builtin-converter 'int) "files" #f)
+                   '(make-positional-ast "dest" 1 1 #f "" #f))
              '((make-option-ast "-a" #f 1 1 #f "" #f #f)))))
+
+  (define-test test-one-positional-is-emitted
+    (CHECK equal?
+           (syntax->datum
+            (generate-definition #'p '() (list (make-positional-ast "file" 1 1 #f "" #f))))
+           (definition-with-positional 'p '((make-positional-ast "file" 1 1 #f "" #f)) '())))
 
   (define-test test-no-options
     (CHECK equal? (generate #'parser) (definition 'parser)))

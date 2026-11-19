@@ -375,9 +375,28 @@
     (CHECK equal? (positional-problems (list (positional 'p "file" 1 unlimited))) '())
     (CHECK equal? (positional-problems '()) '()))
 
-  (define-test test-a-second-positional-is-a-problem
-    (CHECK equal? (positional-problems (list (positional 'p "a" 1 1) (positional 'q "b" 1 1)))
-           (list (cons "only one :positional clause is allowed" 'q))))
+  (define variable-message
+    "only one positional argument can take a variable number of words, the others need an exact arity")
+
+  (define-test test-several-exact-positionals-are-fine
+    (CHECK equal? (positional-problems (list (positional 'p "a" 1 1) (positional 'q "b" 2 2) (positional 'r "c" 3 3)))
+           '()))
+
+  (define-test test-one-variable-positional-among-exact-ones-is-fine
+    (CHECK equal? (positional-problems (list (positional 'p "src" 1 unlimited) (positional 'q "dest" 1 1))) '())
+    (CHECK equal? (positional-problems (list (positional 'p "a" 2 2) (positional 'q "b" 0 3) (positional 'r "c" 1 1))) '()))
+
+  (define-test test-a-second-variable-positional-is-a-problem
+    (CHECK equal? (positional-problems (list (positional 'p "a" 1 unlimited) (positional 'q "b" 0 1)))
+           (list (cons variable-message 'q)))
+    (CHECK equal? (positional-problems (list (positional 'p "a" 0 1) (positional 'q "b" 0 1)))
+           (list (cons variable-message 'q)))
+    (CHECK equal? (positional-problems (list (positional 'p "a" 1 2) (positional 'q "b" 1 1) (positional 'r "c" 3 4)))
+           (list (cons variable-message 'r))))
+
+  (define-test test-two-positionals-with-the-same-name-are-a-problem
+    (CHECK equal? (positional-problems (list (positional 'p "a" 1 1) (positional 'q "a" 2 2)))
+           (list (cons "positional name is defined twice" 'q))))
 
   (define-test test-positional-name-must-not-start-with-a-dash
     (CHECK equal? (positional-problems (list (positional 'p "-a" 1 1)))

@@ -26,15 +26,20 @@
   (define (clause short . fields)
     (append (if short (list ':short short) '()) (apply append fields)))
 
-  ;; parse-options gives the options and the positional (or #f); these are the options
+  ;; parse-options gives the options and the positionals; these are the options
   (define (options-of clauses)
-    (let-values ([(options positional) (parse-options clauses)])
+    (let-values ([(options positionals) (parse-options clauses)])
       options))
 
-  ;; ... and this is the positional
+  ;; ... these are the positionals
+  (define (positionals-of clauses)
+    (let-values ([(options positionals) (parse-options clauses)])
+      positionals))
+
+  ;; ... and this is the first positional, #f when there is none
   (define (positional-of clauses)
-    (let-values ([(options positional) (parse-options clauses)])
-      positional))
+    (let ([positionals (positionals-of clauses)])
+      (if (null? positionals) #f (car positionals))))
 
   ;; the syntax of a list of clauses, as define-command-line-options receives them
   (define (clauses . clauses) (datum->syntax #'here clauses))
@@ -408,10 +413,19 @@
     (CHECK equal? (positional-ast-name (parse-positional (list ':positional (sym "file")))) "file"))
 
   (define-test test-positional-clause-does-not-disturb-the-options
-    (let-values ([(options positional)
+    (let-values ([(options positionals)
                   (parse-options (clauses (clause "-a") '(:positional "p") (clause "-b")))])
       (CHECK equal? (map option-ast-short options) '("-a" "-b"))
-      (CHECK equal? (positional-ast-name positional) "p")))
+      (CHECK equal? (map positional-ast-name positionals) '("p"))))
+
+  (define-test test-positionals-are-in-the-order-of-the-clauses
+    (CHECK equal? (map positional-ast-name
+                       (positionals-of (clauses '(:positional "a") (clause "-v") '(:positional "b")
+                                                '(:positional "c" :arity (0 +)))))
+           '("a" "b" "c")))
+
+  (define-test test-no-positional-clause-gives-no-positionals
+    (CHECK equal? (positionals-of (clauses (clause "-a"))) '()))
 
   (define-test test-positional-clause-keeps-its-source
     (let ([c (clause #f '(:positional "p"))])
@@ -436,15 +450,20 @@
   (define-test test-positional-type-and-choices-exclude-each-other
     (CHECK eq? (positional-fails? '(:positional "a") '(:type int) '(:choices ("a"))) #t))
 
-  (define-test test-two-positional-clauses-are-a-violation
+  (define-test test-two-positionals-with-a-variable-arity-are-a-violation
     (CHECK eq? (raises-syntax-violation?
-                (lambda () (options-of (clauses '(:positional "a") '(:positional "b")))))
+                (lambda () (options-of (clauses '(:positional "a" :arity (0 1)) '(:positional "b" :arity (1 +))))))
+           #t))
+
+  (define-test test-two-positionals-with-the-same-name-are-a-violation
+    (CHECK eq? (raises-syntax-violation?
+                (lambda () (options-of (clauses '(:positional "a") '(:positional "a")))))
            #t))
 
   (define-test test-positional-with-arity-0-is-a-violation
     (CHECK eq? (positional-fails? '(:positional "a") '(:arity 0)) #t))
 
-  (define-test test-two-positional-clauses-are-a-violation-whatever-the-arity
+  (define-test test-two-positionals-that-both-take-a-variable-number-of-words
     (for-each
      (lambda (arities)
        (CHECK eq? (raises-syntax-violation?
@@ -452,7 +471,17 @@
                      (options-of (clauses `(:positional "a" :arity ,(car arities))
                                           `(:positional "b" :arity ,(cadr arities))))))
               #t))
-     '(((1 +) (1 +)) ((0 +) (1)) (1 (2 +)) ((0 1) (0 1)) (2 3))))
+     '(((1 +) (1 +)) ((0 1) (0 1)) ((1 +) (1 2)) ((0 +) (2 +)))))
+
+  (define-test test-positionals-with-at-most-one-variable-arity-are-fine
+    (for-each
+     (lambda (arities)
+       (CHECK eq? (raises-syntax-violation?
+                   (lambda ()
+                     (options-of (clauses `(:positional "a" :arity ,(car arities))
+                                          `(:positional "b" :arity ,(cadr arities))))))
+              #f))
+     '(((1 +) 1) (1 (1 +)) (2 3) ((0 1) 2) (2 (0 +)) (1 1))))
 
   (define-test test-one-positional-clause-with-any-arity-is-fine
     (for-each

@@ -1097,7 +1097,7 @@
     (let* ([shown #f]
            [option (parse-command-line usage-specs '("--" "-h")
                                        (lambda (text) (set! shown text))
-                                       (make-positional-ast "args" 0 unlimited #f "" #f))])
+                                       (list (make-positional-ast "args" 0 unlimited #f "" #f)))])
       (CHECK eq? shown #f)
       (CHECK equal? (option "args") '("-h"))))
 
@@ -1609,7 +1609,7 @@
       (parse-command-line (list (make-option-ast "-v" #f 0 0 #f "" #f #f))
                           '("--help")
                           (lambda (text) (set! shown text))
-                          (make-positional-ast "file" 1 1 #f "" #f))
+                          (list (make-positional-ast "file" 1 1 #f "" #f)))
       (CHECK eq? (and shown #t) #t)))
 
   ;; ========================================
@@ -1634,7 +1634,7 @@
   (define-test test-usage-placeholders-of-a-positional
     (for-each
      (lambda (case)
-       (let ([usage (format-usage '() "p" (make-positional-ast "f" (car case) (cadr case) #f "" #f))])
+       (let ([usage (format-usage '() "p" (list (make-positional-ast "f" (car case) (cadr case) #f "" #f)))])
          (CHECK eq? (contains? usage (string-append "p [options] [--] " (caddr case) "\n")) #t)))
      (list (list 1 1 "<f>")
            (list 0 1 "[<f>]")
@@ -1646,12 +1646,19 @@
   ;; definition errors of :positional
   ;; ========================================
 
-  (define-test test-syntax-error-two-positional-clauses
+  (define-test test-syntax-error-two-positional-clauses-with-a-variable-arity
     (CHECK eq? (syntax-error?
                 '(let ()
-                   (define-command-line-options p [:positional "a"] [:positional "b"])
+                   (define-command-line-options p [:positional "a" :arity (1 +)] [:positional "b" :arity (0 1)])
                    p))
            #t))
+
+  (define-test test-two-positional-clauses-with-exact-arities-are-fine
+    (CHECK eq? (syntax-error?
+                '(let ()
+                   (define-command-line-options p [:positional "a"] [:positional "b" :arity 2])
+                   p))
+           #f))
 
   (define-test test-syntax-error-positional-with-a-short-name
     (CHECK eq? (syntax-error?
@@ -1736,7 +1743,7 @@
       (parse-command-line (list (make-option-ast #f "--input" 1 1 #f "" #f #t))
                           '("-h")
                           (lambda (text) (set! shown text))
-                          (make-positional-ast "file" 1 1 #f "" #f))
+                          (list (make-positional-ast "file" 1 1 #f "" #f)))
       (CHECK eq? (and shown #t) #t)))
 
   (define-command-line-options parse-upper
@@ -1768,7 +1775,7 @@
                    (list (make-option-ast "-n" "--count" 1 1 (builtin-converter 'int) "" #f #f))
                    '("f" "--count=3")
                    default-on-help
-                   (make-positional-ast "file" 1 1 #f "" #f))])
+                   (list (make-positional-ast "file" 1 1 #f "" #f)))])
       (CHECK eqv? (option "count") 3)
       (CHECK equal? (option "file") "f")))
 
@@ -1787,7 +1794,7 @@
   (define-test test-positional-too-few-and-too-many-through-the-runtime
     (let ([parse-with (lambda (min max words)
                         (parse-command-line '() words default-on-help
-                                            (make-positional-ast "w" min max #f "" #f)))])
+                                            (list (make-positional-ast "w" min max #f "" #f))))])
       (CHECK equal? (error-message (lambda () (parse-with 2 3 '("a")))) "too few positional arguments")
       (CHECK equal? (error-irritants (lambda () (parse-with 2 3 '("a")))) '("w"))
       (CHECK equal? ((parse-with 2 3 '("a" "b")) "w") '("a" "b"))
@@ -1800,7 +1807,7 @@
   ;; ========================================
 
   (define-test test-usage-of-a-positional-without-a-description
-    (CHECK equal? (format-usage '() "p" (make-positional-ast "file" 1 1 #f "" #f))
+    (CHECK equal? (format-usage '() "p" (list (make-positional-ast "file" 1 1 #f "" #f)))
            (string-append "Usage: p [options] [--] <file>\n"
                           "\n"
                           "Arguments:\n"
@@ -1810,7 +1817,7 @@
                           "  -h, --help  show this help message and exit\n")))
 
   (define-test test-usage-of-a-positional-with-a-multi-line-description
-    (CHECK equal? (format-usage '() "p" (make-positional-ast "f" 0 unlimited #f "first\nsecond" #f))
+    (CHECK equal? (format-usage '() "p" (list (make-positional-ast "f" 0 unlimited #f "first\nsecond" #f)))
            (string-append "Usage: p [options] [--] [<f>...]\n"
                           "\n"
                           "Arguments:\n"
@@ -1833,15 +1840,30 @@
                (syntax-error? `(let () (define-command-line-options p ,@body) p)))
              bodies))
 
-  (define-test test-syntax-error-two-positional-clauses-whatever-the-arity
+  (define-test test-syntax-error-two-positionals-that-take-a-variable-number-of-words
     (CHECK eq? (all-syntax-errors?
                 '([:positional "a" :arity (1 +)] [:positional "b" :arity (1 +)])
-                '([:positional "a" :arity (0 +)] [:positional "b"])
-                '([:positional "a"] [:positional "b" :arity (2 +)])
                 '([:positional "a" :arity (0 1)] [:positional "b" :arity (0 1)])
-                '([:positional "a" :arity 2] [:positional "b" :arity 3])
-                '([:positional "a"] [:short "-v" :arity 0] [:positional "b"]))
+                '([:positional "a" :arity (1 +)] [:positional "b" :arity (1 2)])
+                '([:positional "a" :arity (0 +)] [:positional "b" :arity (2 +)])
+                '([:positional "a" :arity (1 2)] [:positional "b"] [:positional "c" :arity (3 4)])
+                '([:positional "a" :arity (0 1)] [:short "-v" :arity 0] [:positional "b" :arity (0 +)]))
            #t))
+
+  (define-test test-syntax-error-two-positionals-with-the-same-name
+    (CHECK eq? (all-syntax-errors?
+                '([:positional "a"] [:positional "a"])
+                '([:positional "a" :arity 2] [:positional "b"] [:positional "a" :arity (0 +)]))
+           #t))
+
+  (define-test test-several-positionals-with-at-most-one-variable-arity-are-fine
+    (CHECK eq? (any-syntax-error?
+                '([:positional "a"] [:positional "b"])
+                '([:positional "source" :arity (1 +)] [:positional "dest"])
+                '([:positional "cmd"] [:positional "args" :arity (0 +)])
+                '([:positional "first"] [:positional "middle" :arity (0 3)] [:positional "last" :arity 2])
+                '([:positional "a" :arity 2] [:positional "b" :arity 3] [:positional "c" :arity (1 +)]))
+           #f))
 
   (define-test test-syntax-error-positional-arity
     (CHECK eq? (all-syntax-errors?
@@ -1901,4 +1923,138 @@
   (define (any-syntax-error? . bodies)
     (exists (lambda (body)
               (syntax-error? `(let () (define-command-line-options p ,@body) p)))
-            bodies)))
+            bodies))
+  ;; ========================================
+  ;; several positionals
+  ;; ========================================
+
+  (define-command-line-options parse-cp
+    [:short "-v" :arity 0 :description "verbose"]
+    [:positional "source" :arity (1 +) :description "files to copy"]
+    [:positional "dest" :description "where to copy them"])
+
+  (define-command-line-options parse-cmd
+    [:positional "cmd"]
+    [:positional "args" :arity (0 +)])
+
+  (define-command-line-options parse-sandwich
+    [:positional "first"]
+    [:positional "middle" :arity (0 +)]
+    [:positional "last"])
+
+  (define-command-line-options parse-bounded
+    [:positional "x" :arity 2]
+    [:positional "y" :arity (0 2)])
+
+  (define-command-line-options parse-typed
+    [:positional "count" :type int]
+    [:positional "mode" :choices ("fast" "slow")]
+    [:positional "rest" :arity (0 +)])
+
+  ;; the values of the positionals, in the order of their names
+  (define (values-of option . names)
+    (map (lambda (name) (option name)) names))
+
+  (define-test test-the-variable-positional-takes-what-the-exact-ones-leave
+    (CHECK equal? (values-of (parse-cp '("a" "b" "c")) "source" "dest") '(("a" "b") "c"))
+    (CHECK equal? (values-of (parse-cp '("a" "b")) "source" "dest") '(("a") "b"))
+    (CHECK equal? (values-of (parse-cp '("a" "b" "c" "d" "e")) "source" "dest")
+           '(("a" "b" "c" "d") "e")))
+
+  (define-test test-an-exact-positional-before-the-variable-one
+    (CHECK equal? (values-of (parse-cmd '("run" "x" "y")) "cmd" "args") '("run" ("x" "y")))
+    (CHECK equal? (values-of (parse-cmd '("run")) "cmd" "args") '("run" ())))
+
+  (define-test test-the-variable-positional-between-two-exact-ones
+    (CHECK equal? (values-of (parse-sandwich '("a" "z")) "first" "middle" "last") '("a" () "z"))
+    (CHECK equal? (values-of (parse-sandwich '("a" "m" "z")) "first" "middle" "last") '("a" ("m") "z"))
+    (CHECK equal? (values-of (parse-sandwich '("a" "m" "n" "o" "z")) "first" "middle" "last")
+           '("a" ("m" "n" "o") "z")))
+
+  (define-test test-an-exact-positional-with-arity-above-one-is-a-list
+    (CHECK equal? (values-of (parse-bounded '("a" "b")) "x" "y") '(("a" "b") ()))
+    (CHECK equal? (values-of (parse-bounded '("a" "b" "c")) "x" "y") '(("a" "b") ("c")))
+    (CHECK equal? (values-of (parse-bounded '("a" "b" "c" "d")) "x" "y") '(("a" "b") ("c" "d"))))
+
+  (define-test test-too-few-names-the-first-positional-that-lacks-words
+    (CHECK equal? (error-message (lambda () (parse-cp '()))) "too few positional arguments")
+    (CHECK equal? (error-irritants (lambda () (parse-cp '()))) '("source"))
+    (CHECK equal? (error-irritants (lambda () (parse-cp '("a")))) '("dest"))
+    (CHECK equal? (error-irritants (lambda () (parse-sandwich '("a")))) '("last"))
+    (CHECK equal? (error-irritants (lambda () (parse-bounded '("a")))) '("x")))
+
+  (define-test test-too-many-gives-the-words-that-no-positional-takes
+    (CHECK equal? (error-message (lambda () (parse-bounded '("a" "b" "c" "d" "e"))))
+           "too many positional arguments")
+    (CHECK equal? (error-irritants (lambda () (parse-bounded '("a" "b" "c" "d" "e" "f"))))
+           '("e" "f"))
+    (CHECK equal? (error-message (lambda () (parse-command-line '() '("a" "b" "c") default-on-help
+                                                                (list (make-positional-ast "p" 1 1 #f "" #f)
+                                                                      (make-positional-ast "q" 1 1 #f "" #f)))))
+           "too many positional arguments"))
+
+  (define-test test-the-variable-positional-has-no-upper-limit
+    (CHECK equal? (length ((parse-cp (map number->string (iota* 100))) "source")) 99))
+
+  (define-test test-every-positional-is-converted-by-its-own-type
+    (let ([option (parse-typed '("3" "fast" "x" "y"))])
+      (CHECK equal? (values-of option "count" "mode" "rest") '(3 "fast" ("x" "y"))))
+    (CHECK equal? (error-irritants (lambda () (parse-typed '("three" "fast")))) '("count" "three"))
+    (CHECK equal? (error-irritants (lambda () (parse-typed '("3" "medium"))))
+           '("mode" "medium" ("fast" "slow"))))
+
+  (define-test test-several-positionals-and-options-in-any-order
+    (let ([option (parse-cp '("a" "-v" "b" "c"))])
+      (CHECK eq? (option "v") 'present)
+      (CHECK equal? (values-of option "source" "dest") '(("a" "b") "c")))
+    (let ([option (parse-cp '("-v" "a" "--" "-b"))])
+      (CHECK equal? (values-of option "source" "dest") '(("a") "-b"))))
+
+  (define-test test-several-positionals-the-escape-and-the-double-dash
+    (CHECK equal? (values-of (parse-cmd '("\\-run" "--" "-x" "\\-y")) "cmd" "args")
+           '("-run" ("-x" "\\-y"))))
+
+  (define-test test-an-unknown-positional-name-is-unknown-with-several
+    (CHECK equal? (error-message (lambda () ((parse-cp '("a" "b")) "other"))) "unknown option"))
+
+  (define-test test-help-needs-no-positional-words-with-several
+    (let ([shown #f])
+      (parse-command-line '() '("--help") (lambda (text) (set! shown text))
+                          (list (make-positional-ast "a" 1 1 #f "" #f)
+                                (make-positional-ast "b" 2 2 #f "" #f)))
+      (CHECK eq? (and shown #t) #t)))
+
+  (define-test test-usage-lists-every-positional
+    (CHECK equal? ((parse-cp '("a" "b")) 'help)
+           (string-append "Usage: " (program-name) " [options] [--] <source>... <dest>\n"
+                          "\n"
+                          "Arguments:\n"
+                          "  <source>...  files to copy\n"
+                          "  <dest>       where to copy them\n"
+                          "\n"
+                          "Options:\n"
+                          "  -v          verbose\n"
+                          "  -h, --help  show this help message and exit\n")))
+
+  (define-test test-usage-of-exact-and-optional-positionals
+    (CHECK equal? ((parse-sandwich '("a" "z")) 'help)
+           (string-append "Usage: " (program-name) " [options] [--] <first> [<middle>...] <last>\n"
+                          "\n"
+                          "Arguments:\n"
+                          "  <first>\n"
+                          "  [<middle>...]\n"
+                          "  <last>\n"
+                          "\n"
+                          "Options:\n"
+                          "  -h, --help  show this help message and exit\n")))
+
+  (define-test test-usage-of-a-positional-with-an-exact-arity-above-one
+    (CHECK equal? ((parse-bounded '("a" "b")) 'help)
+           (string-append "Usage: " (program-name) " [options] [--] <x> <x> [<y>] [<y>]\n"
+                          "\n"
+                          "Arguments:\n"
+                          "  <x> <x>\n"
+                          "  [<y>] [<y>]\n"
+                          "\n"
+                          "Options:\n"
+                          "  -h, --help  show this help message and exit\n"))))
