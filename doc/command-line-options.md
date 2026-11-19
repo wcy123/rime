@@ -273,29 +273,44 @@ prog --count 3                ; long name, argument follows
 prog --count=3                ; long name with =
 prog -n=3                     ; short name with =
 prog -e a b c                 ; several arguments
-prog --exclude=a,b,c          ; several arguments with =, separated by commas
+prog --exclude=a file          ; with =, exactly one argument, "file" is a positional word
 ```
 
 * An option with `(min max)` arguments takes the following words until it has `max` of them, or the
   next word looks like an option, or the word is `--`. Fewer than `min` is an error.
-* With `=`, an option that takes several arguments (`max` above 1) splits the text at every comma and
-  counts the arguments exactly, `--window=1,2`, `--exclude=a,b,c`. This is the way to give an optional
-  argument without ambiguity, `--window=2`. An option that takes one argument gets the whole text
-  after the first `=`, commas included, so `--title="Hello, World"` is the one argument `Hello, World`.
+* With `=`, the text after the first `=` is exactly one argument, whatever it contains: commas, spaces,
+  another `=`, a leading `-`. This is the same rule as in getopt, argparse and click, for every arity.
+  There is no comma list. The words that follow are not consumed, so `=` is the way to stop an option that
+  takes a variable number of arguments (`--exclude=a file` leaves `file` positional, `--exclude a file`
+  would take it), and the way to give an optional argument without ambiguity, `--window=2`.
+* An option that needs two or more arguments cannot use `=`, which gives one: `--pair=3,4` is
+  `too few arguments for option`, write `--pair 3 4`.
 * A flag does not accept `=`.
 
 ```
-$ prog --title="Hello, World"      ; one argument, the comma is part of it
+$ prog '--title=Hello, World'       ; one argument, the comma is part of it
 "title" => "Hello, World"
 
-$ prog --exclude=a,b,c             ; several arguments, split at the commas
-"exclude" => ("a" "b" "c")
+$ prog --exclude=a file             ; one argument, then a positional word
+"exclude" => ("a")
+"file" => ("file")
 
-$ prog --window=1,2
-"window" => (1 2)
+$ prog --exclude a b file           ; a variable number of arguments takes them all
+"exclude" => ("a" "b" "file")
+"file" => ()
 
-$ prog --count=1,2                 ; --count takes one integer, and 1,2 is not one
+$ prog --window=2 file
+"window" => (2)
+"file" => ("file")
+
+$ prog --count=1,2                  ; --count takes one integer, and 1,2 is not one
 Exception in opt-parser: invalid argument value with irritants ("--count" "1,2")
+
+$ prog --pair=3,4                   ; --pair needs two arguments, = gives one
+Exception in opt-parser: too few arguments for option with irritant "--pair"
+
+$ prog --pair 3 4
+"pair" => ("3" "4")
 ```
 
 ## Positional words
@@ -329,7 +344,7 @@ In a shell, write `'\-x'` or `\\-x`.
 prog -s '\-x'                 ; -s gets "-x"
 prog -n '\-5'                 ; -n gets -5
 prog '\-file'                 ; positional "-file"
-prog --files='\-a,b'          ; "-a" "b"
+prog --files=-a                ; "-a", after = a leading dash needs no escape
 ```
 
 A lone `-` is a value, not an option, and so is any word after `--`.
@@ -374,8 +389,7 @@ Catch it with `guard`; the library never exits by itself except for `-h`.
 | message                            | when                                                  | irritants              |
 |------------------------------------|-------------------------------------------------------|------------------------|
 | `unknown option`                   | an option-like word that is not defined               | the word               |
-| `too few arguments for option`     | fewer than `min` arguments                            | the option name        |
-| `too many arguments for option`    | `--name=a,b,c` with more than `max` items, for an option that takes several arguments | the option name        |
+| `too few arguments for option`     | fewer than `min` arguments, also `--name=x` for an option that needs two or more | the option name        |
 | `option does not take arguments`   | `--flag=1` on an arity 0 option                       | the option name        |
 | `invalid argument value`           | the conversion failed                                 | the option name, the text |
 | `argument must be one of the choices` | the argument is not one of the `:choices`          | the option name, the text, the choices |
@@ -447,12 +461,12 @@ $ grep-lite in.txt -v -n 3 out.txt
 "t" => #f
 "file" => ("in.txt" "out.txt")
 
-$ grep-lite --count=3 --exclude=a,b,c --window=1,2 -- -v file
+$ grep-lite --count=3 --exclude a b --window 1 2 -- -v file
 "v" => absent
 "n" => 3
 "r" => #f
 "c" => #f
-"e" => ("a" "b" "c")
+"e" => ("a" "b")
 "w" => (1 2)
 "t" => #f
 "file" => ("-v" "file")
@@ -476,8 +490,8 @@ Exception in opt-parser: too few arguments for option with irritant "-n"
 $ grep-lite --nope
 Exception in opt-parser: unknown option with irritant "--nope"
 
-$ grep-lite --window=1,2,3
-Exception in opt-parser: too many arguments for option with irritant "--window"
+$ grep-lite --window=1,2
+Exception in opt-parser: invalid argument value with irritants ("--window" "1,2")
 
 $ grep-lite --count=1,2
 Exception in opt-parser: invalid argument value with irritants ("--count" "1,2")

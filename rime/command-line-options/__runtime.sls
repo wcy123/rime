@@ -52,24 +52,22 @@
              (scan (parse-option (car tokens) (cdr tokens)))]
             [else (cons (unescape (car tokens)) (scan (cdr tokens)))]))
 
-         ;; token is "-x", "--long" or "-x=a,b" / "--long=a,b"; returns the unconsumed tokens.
-         ;; After =, the text is split at the commas only for an option that takes several arguments.
+         ;; token is "-x", "--long" or "-x=text" / "--long=text"; returns the unconsumed tokens.
+         ;; After =, the text is exactly one argument, whatever it contains (getopt, argparse and click
+         ;; do the same). Following words are not consumed, so an option that takes a variable number of
+         ;; arguments can be stopped, and an option that needs two or more cannot use =.
          (define (parse-option token rest)
            (let* ([equals (index-of #\= token)]
                   [name (if equals (substring token 0 equals) token)]
                   [spec (or (find-spec-by-token specs name) (fail "unknown option" token))])
              (cond
               [equals
-               (let* ([text (substring token (+ equals 1) (string-length token))]
-                      [items (if (> (option-ast-max spec) 1) (split-commas text) (list text))])
-                 (cond [(= 0 (option-ast-max spec))
-                        (fail "option does not take arguments" name)]
-                       [(< (length items) (option-ast-min spec))
-                        (fail "too few arguments for option" name)]
-                       [(> (length items) (option-ast-max spec))
-                        (fail "too many arguments for option" name)])
-                 (store! spec name items)
-                 rest)]
+               (cond [(= 0 (option-ast-max spec))
+                      (fail "option does not take arguments" name)]
+                     [(> (option-ast-min spec) 1)
+                      (fail "too few arguments for option" name)])
+               (store! spec name (list (substring token (+ equals 1) (string-length token))))
+               rest]
               [else
                (let-values ([(items remaining) (take-arguments rest (option-ast-max spec))])
                  (when (< (length items) (option-ast-min spec))
@@ -337,13 +335,6 @@
             [(char=? (string-ref string i) char) i]
             [else (loop (+ i 1))])))
 
-  (define (split-commas string)
-    (let loop ([i 0] [start 0] [parts '()])
-      (cond [(= i (string-length string))
-             (reverse (cons (substring string start i) parts))]
-            [(char=? (string-ref string i) #\,)
-             (loop (+ i 1) (+ i 1) (cons (substring string start i) parts))]
-            [else (loop (+ i 1) start parts)])))
 
   ;; ========================================
   ;; converters, from the text of an argument to a value
