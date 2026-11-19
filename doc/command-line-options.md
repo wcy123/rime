@@ -551,6 +551,10 @@ runtime does not know which kinds there are. Adding a kind of converter means on
 Adding a field to the clause syntax means a keyword in `__keywords.sls` and a pattern in `__parse.sls`,
 a field in the record and a rule in `__ast.sls` if it has one, and a line in `__codegen.sls`.
 
+The reader sets each field of a clause at most once: the procedures it uses,
+`option-ast-<field>-set-if-not-given-yet!`, call `on-duplicate` for a field that was given already, and they
+are generated from the list of fields of each record by `define-field-setters` in `__ast.sls`.
+
 # Tests
 
 One test file, `test/rime/command-line-options-test.sls`, run with

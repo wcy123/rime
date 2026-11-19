@@ -2215,6 +2215,54 @@
                           "Options:\n"
                           "  -h, --help  show this help message and exit\n")))
   ;; ========================================
+  ;; the setters of the records, set once
+  ;; ========================================
+
+  ;; the setters of the records, one for each field: set a field that is still unbound, and call
+  ;; on-duplicate for one that was given already
+  (define (check-setters make-unbound field-setters)
+    (for-each
+     (lambda (entry)
+       (let ([setter (car entry)] [getter (cadr entry)] [first (caddr entry)] [second (cadddr entry)]
+             [calls 0])
+         (let ([record (make-unbound)])
+           (setter record first (lambda () (set! calls (+ calls 1))))
+           (CHECK equal? (getter record) first)
+           (CHECK eqv? calls 0)
+           (setter record second (lambda () (set! calls (+ calls 1))))
+           (CHECK equal? (getter record) first)
+           (CHECK eqv? calls 1))))
+     field-setters))
+
+  (define-test test-option-ast-setters-set-a-field-once
+    (check-setters
+     (lambda () (make-unbound-option-ast 'src))
+     (list (list option-ast-short-set-if-not-given-yet! option-ast-short "-a" "-b")
+           (list option-ast-long-set-if-not-given-yet! option-ast-long "--a" "--b")
+           (list option-ast-min-set-if-not-given-yet! option-ast-min 1 2)
+           (list option-ast-max-set-if-not-given-yet! option-ast-max 3 4)
+           (list option-ast-converter-set-if-not-given-yet! option-ast-converter 'e1 'e2)
+           (list option-ast-description-set-if-not-given-yet! option-ast-description "d1" "d2")
+           (list option-ast-required-set-if-not-given-yet! option-ast-required #t #f))))
+
+  (define-test test-positional-ast-setters-set-a-field-once
+    (check-setters
+     (lambda () (make-unbound-positional-ast 'src))
+     (list (list positional-ast-name-set-if-not-given-yet! positional-ast-name "a" "b")
+           (list positional-ast-min-set-if-not-given-yet! positional-ast-min 1 2)
+           (list positional-ast-max-set-if-not-given-yet! positional-ast-max 3 4)
+           (list positional-ast-converter-set-if-not-given-yet! positional-ast-converter 'e1 'e2)
+           (list positional-ast-description-set-if-not-given-yet! positional-ast-description "d1" "d2"))))
+
+  (define-test test-a-setter-counts-false-as-given
+    (let ([o (make-unbound-option-ast 'src)]
+          [calls 0])
+      (option-ast-short-set-if-not-given-yet! o #f (lambda () (set! calls (+ calls 1))))
+      (option-ast-short-set-if-not-given-yet! o "-a" (lambda () (set! calls (+ calls 1))))
+      (CHECK eqv? calls 1)
+      (CHECK equal? (option-ast-short o) #f)))
+
+  ;; ========================================
   ;; definition errors: which rule is broken, and where
   ;; ========================================
   ;; These tests carry what the unit tests of the AST and of the parser used to carry. A definition

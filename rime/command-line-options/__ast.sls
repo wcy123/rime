@@ -44,7 +44,40 @@
           option-ast-fill-defaults!
           check-options
           check-positionals)
-  (import (rnrs (6)))
+  (import (rnrs (6))
+          (for (rnrs (6)) expand))
+
+  ;; the value of a field that has not been set yet; not #f, which is a value
+  (define unbound (list 'unbound))
+
+  (define (unbound? value)
+    (eq? value unbound))
+
+  ;; (define-field-setters record field ...) defines, for each field of the record, the procedure
+  ;;   (record-field-set-if-not-given-yet! object value on-duplicate)
+  ;; Sets the field in place, but only when it is still `unbound`. If the field was already given,
+  ;; even as #f, it is left alone and (on-duplicate) is called instead: the clause gave the same
+  ;; field twice. The reader sets the fields with these procedures only.
+  ;;   (define-field-setters option-ast short long)  defines
+  ;;   option-ast-short-set-if-not-given-yet!  and  option-ast-long-set-if-not-given-yet!
+  (define-syntax define-field-setters
+    (lambda (stx)
+      (define (name record field suffix)
+        (datum->syntax record
+                       (string->symbol (string-append (symbol->string (syntax->datum record)) "-"
+                                                      (symbol->string field) suffix))))
+      (syntax-case stx ()
+        [(_ record field ...)
+         (let ([fields (syntax->datum #'(field ...))])
+           (with-syntax ([(getter ...) (map (lambda (f) (name #'record f "")) fields)]
+                         [(mutator ...) (map (lambda (f) (name #'record f "-set!")) fields)]
+                         [(setter ...) (map (lambda (f) (name #'record f "-set-if-not-given-yet!")) fields)])
+             #'(begin
+                 (define (setter object value on-duplicate)
+                   (if (unbound? (getter object))
+                       (mutator object value)
+                       (on-duplicate)))
+                 ...)))])))
 
   ;; short       string "-n", or #f
   ;; long        string "--count", or #f; an option has a short name, a long name, or both
@@ -94,11 +127,7 @@
             source
             (mutable required)))
 
-  ;; the value of a field that has not been set yet; not #f, which is a value
-  (define unbound (list 'unbound))
-
-  (define (unbound? value)
-    (eq? value unbound))
+  (define-field-setters option-ast short long min max converter description required)
 
   ;; The :positional clause: the words of the command line that are not options.
   ;; name         string, what the program reads them by, and what the usage shows: <name>
@@ -115,33 +144,10 @@
             (mutable description)
             source))
 
+  (define-field-setters positional-ast name min max converter description)
+
   (define (make-unbound-positional-ast source)
     (make-positional-ast unbound unbound unbound unbound unbound source))
-
-  (define (positional-ast-name-set-if-not-given-yet! positional value on-duplicate)
-    (if (unbound? (positional-ast-name positional))
-        (positional-ast-name-set! positional value)
-        (on-duplicate)))
-
-  (define (positional-ast-min-set-if-not-given-yet! positional value on-duplicate)
-    (if (unbound? (positional-ast-min positional))
-        (positional-ast-min-set! positional value)
-        (on-duplicate)))
-
-  (define (positional-ast-max-set-if-not-given-yet! positional value on-duplicate)
-    (if (unbound? (positional-ast-max positional))
-        (positional-ast-max-set! positional value)
-        (on-duplicate)))
-
-  (define (positional-ast-converter-set-if-not-given-yet! positional value on-duplicate)
-    (if (unbound? (positional-ast-converter positional))
-        (positional-ast-converter-set! positional value)
-        (on-duplicate)))
-
-  (define (positional-ast-description-set-if-not-given-yet! positional value on-duplicate)
-    (if (unbound? (positional-ast-description positional))
-        (positional-ast-description-set! positional value)
-        (on-duplicate)))
 
   ;; the defaults: exactly one word, no converter, no description; the name is always given
   (define (positional-ast-fill-defaults! positional)
@@ -153,44 +159,6 @@
   ;; an option that only has its source, everything else is still to be read
   (define (make-unbound-option-ast source)
     (make-option-ast unbound unbound unbound unbound unbound unbound source unbound))
-
-  ;; (option-ast-<field>-set-if-not-given-yet! option value on-duplicate)
-  ;; Sets the field in place. If the field was already given, even as #f, it is left alone and
-  ;; (on-duplicate) is called instead: the clause gave the same field twice.
-  (define (option-ast-short-set-if-not-given-yet! option value on-duplicate)
-    (if (unbound? (option-ast-short option))
-        (option-ast-short-set! option value)
-        (on-duplicate)))
-
-  (define (option-ast-long-set-if-not-given-yet! option value on-duplicate)
-    (if (unbound? (option-ast-long option))
-        (option-ast-long-set! option value)
-        (on-duplicate)))
-
-  (define (option-ast-min-set-if-not-given-yet! option value on-duplicate)
-    (if (unbound? (option-ast-min option))
-        (option-ast-min-set! option value)
-        (on-duplicate)))
-
-  (define (option-ast-max-set-if-not-given-yet! option value on-duplicate)
-    (if (unbound? (option-ast-max option))
-        (option-ast-max-set! option value)
-        (on-duplicate)))
-
-  (define (option-ast-converter-set-if-not-given-yet! option value on-duplicate)
-    (if (unbound? (option-ast-converter option))
-        (option-ast-converter-set! option value)
-        (on-duplicate)))
-
-  (define (option-ast-description-set-if-not-given-yet! option value on-duplicate)
-    (if (unbound? (option-ast-description option))
-        (option-ast-description-set! option value)
-        (on-duplicate)))
-
-  (define (option-ast-required-set-if-not-given-yet! option value on-duplicate)
-    (if (unbound? (option-ast-required option))
-        (option-ast-required-set! option value)
-        (on-duplicate)))
 
   ;; the defaults: no names, exactly one argument, no converter, no description, not required;
   ;; only the fields that are still unbound are set
