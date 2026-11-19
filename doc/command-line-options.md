@@ -44,8 +44,9 @@ the list of command line arguments (without the program name).
 | `:type <type>`       | how to convert each argument, not allowed with arity `0`   | `string`   |
 | `:choices (...)`     | the arguments must be one of these, see [Choices](#choices) | none       |
 | `:description "..."` | text shown by `--help`                                     | empty      |
+| `:required`          | it is an error when the option is absent, see [Required options](#required-options) | optional |
 
-The keywords `:short :long :arity :type :choices :description` are exported by the library, so import it whole
+The keywords `:short :long :arity :type :choices :description :required` are exported by the library, so import it whole
 (`(import (rime command-line-options))`); `(only (rime command-line-options) define-command-line-options)`
 would leave them unbound and the clauses would be rejected.
 
@@ -148,6 +149,29 @@ $ prog --format xml
 Exception in opt-parser: argument must be one of the choices with irritants ("--format" "xml" ("json" "text" "yaml"))
 ```
 
+## Required options
+
+`:required` has no value. When the command line does not give the option, the parser raises
+`missing required option` (see [Errors](#errors)), and no accessor is returned.
+
+```scheme
+(define-command-line-options parse
+  [:short "-i" :long "--input" :required :description "file to read"]
+  [:short "-o" :long "--output" :description "file to write"])
+```
+
+```
+$ copy -i a.txt
+"a.txt"                       ; (option "--input")
+$ copy -o b.txt
+missing required option: ("--input")
+```
+
+An option counts as given when it is on the command line, even with no arguments:
+a required `-o` with arity `(0 +)` is satisfied by `-o` alone. `-h` and `--help` need no
+required option, they print the usage first. A flag (arity `0`) cannot be `:required`, that is
+a syntax violation when the program is compiled.
+
 # Reading the result
 
 `(parse arguments)` returns an accessor procedure, conventionally called `option`.
@@ -157,8 +181,10 @@ Exception in opt-parser: argument must be one of the choices with irritants ("--
 | `(option "-b")` or `(option "--long")`  | the value of the option, by short or long name              |
 | `(option 0)`, `(option 1)`, ...         | the positional argument at that index, always a string      |
 | `(option 'number-of-positional-argument)` | the number of positional arguments                        |
+| `(option 'help)`                        | the usage text, as a string, the same text that `--help` prints |
 
 Symbols work as names as well, `(option (string->symbol "-b"))`.
+`'number-of-positional-argument` and `'help` are not option names, option names start with `-`.
 
 What an option gives depends on its arity:
 
@@ -248,6 +274,9 @@ Options:
   -h, --help                    show this help message and exit
 ```
 
+`(option 'help)` returns this same text as a string, to print it from the program,
+for example `(display (option 'help))`.
+
 The placeholder shows the arity: `<int> <int>` for 2, `<string>...` for `(1 +)`, `[<string>...]` for
 `(0 +)`, `[<int>] [<int>]` for `(0 2)`. A custom `:type` procedure is shown as `<value>`.
 The program name is the first element of `(command-line)`.
@@ -265,6 +294,7 @@ Catch it with `guard`; the library never exits by itself except for `-h`.
 | `option does not take arguments`   | `--flag=1` on an arity 0 option                       | the option name        |
 | `invalid argument value`           | the conversion failed                                 | the option name, the text |
 | `argument must be one of the choices` | the argument is not one of the `:choices`          | the option name, the text, the choices |
+| `missing required option`          | a `:required` option is absent                        | the long name, or the short name when there is no long one |
 
 ```scheme
 (guard (e [(error? e) (display (condition-message e)) (newline) (exit 2)])

@@ -11,7 +11,7 @@
     (run-all-tests))
 
   (define (opt short long min max converter description)
-    (make-option-ast short long min max converter description #f))
+    (make-option-ast short long min max converter description #f #f))
 
   ;; the generated definition, as a datum
   (define (generate parser . options)
@@ -24,6 +24,12 @@
          (lambda (arguments)
            (parse-command-line specs arguments)))))
 
+  (define-test test-required-is-emitted
+    (CHECK equal?
+           (syntax->datum
+            (generate-definition #'p (list (make-option-ast "-a" #f 1 1 #f "" #f #t))))
+           (definition 'p '(make-option-ast "-a" #f 1 1 #f "" #f #t))))
+
   (define-test test-no-options
     (CHECK equal? (generate #'parser) (definition 'parser)))
 
@@ -33,31 +39,31 @@
   (define-test test-short-and-long-name-description
     (CHECK equal?
            (generate #'p (opt "-n" "--count" 1 1 #'(builtin-converter 'int) "repeat count"))
-           (definition 'p '(make-option-ast "-n" "--count" 1 1 (builtin-converter 'int) "repeat count" #f))))
+           (definition 'p '(make-option-ast "-n" "--count" 1 1 (builtin-converter 'int) "repeat count" #f #f))))
 
   (define-test test-missing-long-name
     (CHECK equal?
            (generate #'p (opt "-n" #f 1 1 #'(builtin-converter 'int) ""))
-           (definition 'p '(make-option-ast "-n" #f 1 1 (builtin-converter 'int) "" #f))))
+           (definition 'p '(make-option-ast "-n" #f 1 1 (builtin-converter 'int) "" #f #f))))
 
   (define-test test-long-name-only
     (CHECK equal?
            (generate #'p (opt #f "--count" 1 1 #'(builtin-converter 'int) ""))
-           (definition 'p '(make-option-ast #f "--count" 1 1 (builtin-converter 'int) "" #f))))
+           (definition 'p '(make-option-ast #f "--count" 1 1 (builtin-converter 'int) "" #f #f))))
 
   (define-test test-short-name-only-and-both
     (CHECK equal?
            (generate #'p (opt "-a" #f 1 1 #f "") (opt "-b" "--beta" 1 1 #f ""))
            (definition 'p
-             '(make-option-ast "-a" #f 1 1 #f "" #f)
-             '(make-option-ast "-b" "--beta" 1 1 #f "" #f))))
+             '(make-option-ast "-a" #f 1 1 #f "" #f #f)
+             '(make-option-ast "-b" "--beta" 1 1 #f "" #f #f))))
 
   (define-test test-the-converter-expression-is-emitted-as-is
     (for-each
      (lambda (expression)
        (CHECK equal?
               (generate #'p (opt "-a" #f 1 1 (datum->syntax #'here expression) ""))
-              (definition 'p `(make-option-ast "-a" #f 1 1 ,expression "" #f))))
+              (definition 'p `(make-option-ast "-a" #f 1 1 ,expression "" #f #f))))
      '((builtin-converter 'int)
        (builtin-converter 'bool)
        string-upcase
@@ -66,24 +72,24 @@
   (define-test test-no-converter-means-the-text-as-it-is
     (CHECK equal?
            (generate #'p (opt "-a" #f 1 1 #f ""))
-           (definition 'p '(make-option-ast "-a" #f 1 1 #f "" #f))))
+           (definition 'p '(make-option-ast "-a" #f 1 1 #f "" #f #f))))
 
   (define-test test-flag
     (CHECK equal?
            (generate #'p (opt "-v" "--verbose" 0 0 #f "verbose"))
-           (definition 'p '(make-option-ast "-v" "--verbose" 0 0 #f "verbose" #f))))
+           (definition 'p '(make-option-ast "-v" "--verbose" 0 0 #f "verbose" #f #f))))
 
   (define-test test-custom-type-uses-the-given-expression
     (CHECK equal?
            (generate #'p (opt "-a" #f 1 1 #'(lambda (s) (string-upcase s)) ""))
-           (definition 'p '(make-option-ast "-a" #f 1 1 (lambda (s) (string-upcase s)) "" #f))))
+           (definition 'p '(make-option-ast "-a" #f 1 1 (lambda (s) (string-upcase s)) "" #f #f))))
 
   (define-test test-bounded-and-unbounded-arity
     (CHECK equal?
            (generate #'p (opt "-a" #f 0 2 #f "") (opt "-b" #f 1 unlimited #f ""))
            (definition 'p
-             '(make-option-ast "-a" #f 0 2 #f "" #f)
-             `(make-option-ast "-b" #f 1 ,unlimited #f "" #f))))
+             '(make-option-ast "-a" #f 0 2 #f "" #f #f)
+             `(make-option-ast "-b" #f 1 ,unlimited #f "" #f #f))))
 
   (define-test test-options-keep-their-order
     (CHECK equal?
@@ -92,9 +98,9 @@
                      (opt "-a" #f 1 1 #f "")
                      (opt "-b" #f 1 1 #f ""))
            (definition 'p
-             '(make-option-ast "-c" #f 1 1 #f "" #f)
-             '(make-option-ast "-a" #f 1 1 #f "" #f)
-             '(make-option-ast "-b" #f 1 1 #f "" #f))))
+             '(make-option-ast "-c" #f 1 1 #f "" #f #f)
+             '(make-option-ast "-a" #f 1 1 #f "" #f #f)
+             '(make-option-ast "-b" #f 1 1 #f "" #f #f))))
 
   (define-test test-the-source-is-not-needed
-    (CHECK eq? (pair? (generate #'p (make-option-ast "-a" #f 1 1 #f "" 'anything))) #t)))
+    (CHECK eq? (pair? (generate #'p (make-option-ast "-a" #f 1 1 #f "" 'anything #f))) #t)))

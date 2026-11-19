@@ -21,7 +21,7 @@
           (rime command-line-options __ast))
 
   (define help-spec
-    (make-option-ast "-h" "--help" 0 0 #f "show this help message and exit" #f))
+    (make-option-ast "-h" "--help" 0 0 #f "show this help message and exit" #f #f))
 
   ;; ========================================
   ;; parsing the command line
@@ -34,12 +34,15 @@
       [(specs args on-help)
        (let ([table (make-eq-hashtable)])   ; option -> the converted arguments
 
+         (define help-asked? #f)
+
          ;; returns the positional arguments; options and positional words may come in any order
          (define (scan tokens)
            (cond
             [(null? tokens) '()]
             [(string=? (car tokens) "--") (cdr tokens)]
             [(member (car tokens) '("-h" "--help"))
+             (set! help-asked? #t)
              (on-help (format-usage specs (program-name)))
              '()]
             [(option-like? (car tokens))
@@ -87,16 +90,30 @@
            (let ([convert (converter-convert (spec-converter spec))])
              (map (lambda (item) (convert (unescape item) name)) items)))
 
-         (make-accessor specs table (list->vector (scan args))))]))
+         (let ([positionals (scan args)])
+           (unless help-asked?
+             (check-required specs table))
+           (make-accessor specs table (list->vector positionals))))]))
+
+  ;; the first required option that was not given is an error; the long name is the one to show
+  (define (check-required specs table)
+    (for-each
+     (lambda (spec)
+       (when (and (option-ast-required spec) (not (hashtable-contains? table spec)))
+         (fail "missing required option" (or (option-ast-long spec) (option-ast-short spec)))))
+     specs))
 
   (define (default-on-help text)
     (display text)
     (exit 0))
 
-  ;; the procedure the user gets: (option "-n"), (option 0), (option 'number-of-positional-argument)
+  ;; the procedure the user gets: (option "-n"), (option 0), (option 'number-of-positional-argument),
+  ;; (option 'help)
   (define (make-accessor specs table positionals)
     (lambda (key)
       (cond
+       [(eq? key 'help)
+        (format-usage specs (program-name))]
        [(and (number? key) (exact? key) (integer? key))
         (if (and (>= key 0) (< key (vector-length positionals)))
             (vector-ref positionals key)

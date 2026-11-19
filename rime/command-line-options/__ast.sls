@@ -13,12 +13,14 @@
           option-ast-converter
           option-ast-description
           option-ast-source
+          option-ast-required
           option-ast-short-set-if-not-given-yet!
           option-ast-long-set-if-not-given-yet!
           option-ast-min-set-if-not-given-yet!
           option-ast-max-set-if-not-given-yet!
           option-ast-converter-set-if-not-given-yet!
           option-ast-description-set-if-not-given-yet!
+          option-ast-required-set-if-not-given-yet!
           unlimited
           unbound
           unbound?
@@ -35,6 +37,7 @@
   ;;               time, the converter object itself at runtime; opaque here, never inspected
   ;; description string
   ;; source      opaque, where the option came from; only handed back to `report` below, #f at runtime
+  ;; required    boolean, #t when it is an error that the option is absent; never #t for a flag
   ;;
   ;; The record is the same at compile time and at runtime: the generated code builds it again
   ;; (__codegen.sls) and the runtime works with it (__runtime.sls).
@@ -49,7 +52,8 @@
             (mutable max)
             (mutable converter)
             (mutable description)
-            source))
+            source
+            (mutable required)))
 
   ;; the value of a field that has not been set yet; not #f, which is a value
   (define unbound (list 'unbound))
@@ -59,7 +63,7 @@
 
   ;; an option that only has its source, everything else is still to be read
   (define (make-unbound-option-ast source)
-    (make-option-ast unbound unbound unbound unbound unbound unbound source))
+    (make-option-ast unbound unbound unbound unbound unbound unbound source unbound))
 
   ;; (option-ast-<field>-set-if-not-given-yet! option value on-duplicate)
   ;; Sets the field in place. If the field was already given, even as #f, it is left alone and
@@ -94,7 +98,12 @@
         (option-ast-description-set! option value)
         (on-duplicate)))
 
-  ;; the defaults: no names, exactly one argument, no converter, no description;
+  (define (option-ast-required-set-if-not-given-yet! option value on-duplicate)
+    (if (unbound? (option-ast-required option))
+        (option-ast-required-set! option value)
+        (on-duplicate)))
+
+  ;; the defaults: no names, exactly one argument, no converter, no description, not required;
   ;; only the fields that are still unbound are set
   (define (option-ast-fill-defaults! option)
     (option-ast-short-set-if-not-given-yet! option #f ignore)
@@ -102,7 +111,8 @@
     (option-ast-min-set-if-not-given-yet! option 1 ignore)
     (option-ast-max-set-if-not-given-yet! option 1 ignore)
     (option-ast-converter-set-if-not-given-yet! option #f ignore)
-    (option-ast-description-set-if-not-given-yet! option "" ignore))
+    (option-ast-description-set-if-not-given-yet! option "" ignore)
+    (option-ast-required-set-if-not-given-yet! option #f ignore))
 
   (define (ignore) #f)
 
@@ -127,7 +137,9 @@
     (when (> (option-ast-min option) (option-ast-max option))
       (report "arity min must not exceed max" option))
     (when (and (flag? option) (option-ast-converter option))
-      (report ":type and :choices must not be given when arity is 0" option)))
+      (report ":type and :choices must not be given when arity is 0" option))
+    (when (and (flag? option) (option-ast-required option))
+      (report "a flag (arity 0) cannot be :required" option)))
 
   ;; names must be unique across all options and must not use the built-in help names
   (define (check-names options report)

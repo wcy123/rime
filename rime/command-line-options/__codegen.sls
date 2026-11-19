@@ -26,5 +26,6 @@
                   [min (datum->syntax #'here (option-ast-min option))]
                   [max (datum->syntax #'here (option-ast-max option))]
                   [converter (or (option-ast-converter option) #'#f)]
-                  [description (datum->syntax #'here (option-ast-description option))])
-      #'(make-option-ast short long min max converter description #f))))
+                  [description (datum->syntax #'here (option-ast-description option))]
+                  [required (datum->syntax #'here (option-ast-required option))])
+      #'(make-option-ast short long min max converter description #f required))))

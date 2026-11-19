@@ -12,7 +12,7 @@
 
   ;; an option with the given parts, `tag` stands for its source
   (define (opt tag short long min max type)
-    (make-option-ast short long min max type "" tag))
+    (make-option-ast short long min max type "" tag #f))
 
   ;; the on-duplicate of a field that must not be given twice
   (define (never) (error 'test "field given twice"))
@@ -46,14 +46,15 @@
     (CHECK equal? (problems (make-option-ast "-a" #f 0 1 #f "" 'a #t)) '()))
 
   (define-test test-record-fields
-    (let ([o (make-option-ast "-n" "--count" 0 2 'int "repeat" 'src)])
+    (let ([o (make-option-ast "-n" "--count" 0 2 'int "repeat" 'src #t)])
       (CHECK equal? (option-ast-short o) "-n")
       (CHECK equal? (option-ast-long o) "--count")
       (CHECK equal? (option-ast-min o) 0)
       (CHECK equal? (option-ast-max o) 2)
       (CHECK equal? (option-ast-converter o) 'int)
       (CHECK equal? (option-ast-description o) "repeat")
-      (CHECK equal? (option-ast-source o) 'src)))
+      (CHECK equal? (option-ast-source o) 'src)
+      (CHECK equal? (option-ast-required o) #t)))
 
   ;; ========================================
   ;; the unbound state, while a clause is being read
@@ -61,7 +62,7 @@
 
   (define (all-fields option)
     (list (option-ast-short option) (option-ast-long option) (option-ast-min option) (option-ast-max option)
-          (option-ast-converter option) (option-ast-description option)))
+          (option-ast-converter option) (option-ast-description option) (option-ast-required option)))
 
   (define-test test-unbound-is-not-a-value
     (CHECK eq? (unbound? unbound) #t)
@@ -72,7 +73,7 @@
   (define-test test-a-new-option-only-has-its-source
     (let ([o (make-unbound-option-ast 'src)])
       (CHECK equal? (option-ast-source o) 'src)
-      (CHECK equal? (map unbound? (all-fields o)) '(#t #t #t #t #t #t))))
+      (CHECK equal? (map unbound? (all-fields o)) '(#t #t #t #t #t #t #t))))
 
   (define-test test-fields-are-set-in-place
     (let ([o (make-unbound-option-ast 'src)])
@@ -82,8 +83,9 @@
       (option-ast-max-set-if-not-given-yet! o unlimited never)
       (option-ast-converter-set-if-not-given-yet! o 'expr never)
       (option-ast-description-set-if-not-given-yet! o "repeat" never)
-      (CHECK equal? (all-fields o) (list "-n" "--count" 0 unlimited 'expr "repeat"))
-      (CHECK equal? (map unbound? (all-fields o)) '(#f #f #f #f #f #f))))
+      (option-ast-required-set-if-not-given-yet! o #t never)
+      (CHECK equal? (all-fields o) (list "-n" "--count" 0 unlimited 'expr "repeat" #t))
+      (CHECK equal? (map unbound? (all-fields o)) '(#f #f #f #f #f #f #f))))
 
   ;; (field setter getter first second): the setter sets `first`, then calls on-duplicate for `second`
   (define wrappers
@@ -92,7 +94,8 @@
           (list "min" option-ast-min-set-if-not-given-yet! option-ast-min 1 2)
           (list "max" option-ast-max-set-if-not-given-yet! option-ast-max 3 4)
           (list "converter" option-ast-converter-set-if-not-given-yet! option-ast-converter 'e1 'e2)
-          (list "description" option-ast-description-set-if-not-given-yet! option-ast-description "d1" "d2")))
+          (list "description" option-ast-description-set-if-not-given-yet! option-ast-description "d1" "d2")
+          (list "required" option-ast-required-set-if-not-given-yet! option-ast-required #t #f)))
 
   (define-test test-set-if-not-given-yet-sets-an-unbound-field
     (for-each
@@ -158,12 +161,12 @@
       (CHECK eq? (unbound? (option-ast-long o)) #f)
       (CHECK eq? (unbound? (option-ast-converter o)) #f)
       (option-ast-fill-defaults! o)
-      (CHECK equal? (all-fields o) '(#f #f 1 1 #f ""))))
+      (CHECK equal? (all-fields o) '(#f #f 1 1 #f "" #f))))
 
   (define-test test-defaults-for-a-bare-option
     (let ([o (make-unbound-option-ast 'src)])
       (option-ast-fill-defaults! o)
-      (CHECK equal? (all-fields o) '(#f #f 1 1 #f ""))
+      (CHECK equal? (all-fields o) '(#f #f 1 1 #f "" #f))
       (CHECK equal? (option-ast-source o) 'src)))
 
   (define-test test-defaults-keep-what-was-given
@@ -174,13 +177,13 @@
       (option-ast-max-set-if-not-given-yet! o 5 never)
       (option-ast-converter-set-if-not-given-yet! o 'int never)
       (option-ast-fill-defaults! o)
-      (CHECK equal? (all-fields o) '("-n" "--count" 2 5 int ""))))
+      (CHECK equal? (all-fields o) '("-n" "--count" 2 5 int "" #f))))
 
   (define-test test-defaults-are-idempotent
     (let ([o (make-unbound-option-ast 'src)])
       (option-ast-fill-defaults! o)
       (option-ast-fill-defaults! o)
-      (CHECK equal? (all-fields o) '(#f #f 1 1 #f ""))))
+      (CHECK equal? (all-fields o) '(#f #f 1 1 #f "" #f))))
 
   (define-test test-unlimited-is-the-largest-possible-max
     (CHECK equal? unlimited (greatest-fixnum))
