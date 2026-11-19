@@ -522,6 +522,8 @@ $ prog -s '\-v'                   ; the escape gives the word -v
   argument when it takes a variable number of them. A program that declares no positional word
   rejects it, `unexpected positional argument`.
 * A lone `-` is a word, not an option, and so is any word after `--`.
+* The compact forms `-j4` and `-vq` are ordinary words too: write `-j 4` and `-v -q`, see
+  [Recipes](#recipes) (short forms, verbosity).
 
 # Help
 
@@ -565,6 +567,9 @@ without intercepting `exit`.
 The placeholder shows the arity: `<int> <int>` for 2, `<string>...` for `(1 +)`, `[<string>...]` for
 `(0 +)`, `[<int>] [<int>]` for `(0 2)`. A custom `:type` procedure is shown as `<value>`.
 The program name is the first element of `(command-line)`.
+
+There is no place in the usage for a sentence about the program, and no built-in `--version`: the program
+does both with the help hook and a look at its arguments, see [Recipes](#recipes).
 
 # Errors
 
@@ -639,6 +644,361 @@ the text `names are read without the dashes`, and for any other name, the list o
 
 These accessor errors are mistakes of the program, not of the command line: they are ordinary
 errors, and `command-line-error?` is `#f` for them.
+
+# Recipes
+
+The library leaves some things to the program, because the program does them in a few lines with what the library
+already gives. Each recipe is a complete program, and the output is from real runs.
+
+## A program description and an epilog
+
+The usage has no place for a sentence about the program. The program prints its own text around the usage with
+the help hook, the optional second argument of the parser (see [Help](#help)). The hook receives the usage text
+and decides what to do with it, here print it between two paragraphs and exit.
+
+```scheme
+#!r6rs
+(import (rnrs (6)) (rime command-line-options))
+
+(define-command-line-options parse
+  [:short "-v" :long "--verbose" :arity 0 :description "print each file"]
+  [:positional "source" :arity (1 +) :description "files to copy"]
+  [:positional "dest" :description "where to copy them"])
+
+;; the help hook: print the program's own text around the usage
+(define (show-help usage)
+  (display "Copy files to a directory.\n\n")
+  (display usage)
+  (display "\nExample: cp-lite a.txt b.txt dest/\n")
+  (exit 0))
+
+(define option
+  (parse-or-exit (lambda (arguments) (parse arguments show-help)) (cdr (command-line))))
+(write (option "source")) (newline)
+(write (option "dest")) (newline)
+```
+
+```
+$ prog -h
+Copy files to a directory.
+
+Usage: prog [options] [--] <source>... <dest>
+
+Arguments:
+  <source>...  files to copy
+  <dest>       where to copy them
+
+Options:
+  -v, --verbose  print each file
+  -h, --help     show this help message and exit
+
+Example: cp-lite a.txt b.txt dest/
+
+$ prog a.txt b.txt dest/
+("a.txt" "b.txt")
+"dest/"
+```
+
+* `parse-or-exit` takes a procedure of the arguments, so the hook is passed in a `lambda`.
+* The text can come from anywhere, a file or a procedure, and the hook can print it to the error port or exit with another code.
+
+## `--version`
+
+There is no built-in `--version`. A program looks for it in the raw arguments before the parse. That also works when
+an option is required: the parser would stop with `missing required option` before it could answer. The search stops
+at `--`, after which every word is literal.
+
+```scheme
+#!r6rs
+(import (rnrs (6)) (rime command-line-options))
+
+(define-command-line-options parse
+  [:short "-i" :long "--input" :required :description "file to read"])
+
+;; --version has to work without the required option, so it is looked for before the parse;
+;; the search stops at --, after which every word is literal
+(define (asks-for-version? arguments)
+  (and (pair? arguments)
+       (not (string=? (car arguments) "--"))
+       (or (string=? (car arguments) "--version")
+           (asks-for-version? (cdr arguments)))))
+
+(define arguments (cdr (command-line)))
+(when (asks-for-version? arguments)
+  (display "prog 1.2.3\n")
+  (exit 0))
+
+(define option (parse-or-exit parse arguments))
+(write (option "input")) (newline)
+```
+
+```
+$ prog --version
+prog 1.2.3
+
+$ prog -i a.txt
+"a.txt"
+
+$ prog
+prog: missing required option: "--input"
+
+Usage: prog [options]
+
+Options:
+  -i, --input <string>  file to read
+  -h, --help            show this help message and exit
+[exit 2]
+```
+
+* The version is a string of the program; nothing in the library has to know it.
+
+## Defaults from the environment
+
+The default given to the accessor, `(option "output" default)`, is computed when the program runs, so it can come from
+the environment. The command line wins, then the environment, then the last resort. `getenv` is not part of R6RS:
+it comes from your implementation, `(only (chezscheme) getenv)` here and `getenv` of `(guile)` on Guile.
+
+```scheme
+#!r6rs
+(import (rnrs (6)) (only (chezscheme) getenv) (rime command-line-options))
+
+(define-command-line-options parse
+  [:short "-o" :long "--output" :description "output file"])
+
+(define option (parse-or-exit parse (cdr (command-line))))
+
+;; the command line first, then the environment, then "a.out"
+(display (option "output" (or (getenv "CP_OUTPUT") "a.out")))
+(newline)
+```
+
+```
+$ prog
+a.out
+
+$ CP_OUTPUT=env.out prog
+env.out
+
+$ CP_OUTPUT=env.out prog -o cli.out
+cli.out
+```
+
+* The default is used only when the option was not given, see [A default for an option that was not given](#a-default-for-an-option-that-was-not-given).
+
+## Options that exclude each other
+
+The library does not know that two options cannot be given together. The program checks after the parse. A flag is
+`#t` or `#f`, so `and` is enough, and the program decides the message and the exit code.
+
+```scheme
+#!r6rs
+(import (rnrs (6)) (rime command-line-options))
+
+(define-command-line-options parse
+  [:long "--json" :arity 0 :description "write json"]
+  [:long "--text" :arity 0 :description "write text"])
+
+(define option (parse-or-exit parse (cdr (command-line))))
+
+;; flags are #t or #f, so and works
+(when (and (option "json") (option "text"))
+  (display "prog: --json and --text exclude each other\n" (current-error-port))
+  (exit 2))
+(display (if (option "json") "json" "text"))
+(newline)
+```
+
+```
+$ prog --json
+json
+
+$ prog --text
+text
+
+$ prog --json --text
+prog: --json and --text exclude each other
+[exit 2]
+```
+
+## Subcommands
+
+A program with commands (`copy`, `remove`) uses one parser for each command and chooses it by the first word. Each
+command has its own options, its own usage and its own errors.
+
+```scheme
+#!r6rs
+(import (rnrs (6)) (rime command-line-options))
+
+(define-command-line-options parse-copy
+  [:short "-v" :arity 0 :description "print each file"]
+  [:positional "source" :arity (1 +) :description "files to copy"]
+  [:positional "dest" :description "where to copy them"])
+
+(define-command-line-options parse-remove
+  [:long "--force" :arity 0 :description "do not ask"]
+  [:positional "file" :arity (1 +) :description "files to remove"])
+
+;; one parser per command, chosen by the first word
+(define arguments (cdr (command-line)))
+(cond
+ [(null? arguments)
+  (display "usage: prog copy|remove ...\n" (current-error-port))
+  (exit 2)]
+ [(string=? (car arguments) "copy")
+  (let ([option (parse-or-exit parse-copy (cdr arguments))])
+    (write (list 'copy (option "source") (option "dest"))) (newline))]
+ [(string=? (car arguments) "remove")
+  (let ([option (parse-or-exit parse-remove (cdr arguments))])
+    (write (list 'remove (option "force") (option "file"))) (newline))]
+ [else
+  (display "prog: unknown command " (current-error-port))
+  (display (car arguments) (current-error-port))
+  (newline (current-error-port))
+  (exit 2)])
+```
+
+```
+$ prog copy a b dest/
+(copy ("a" "b") "dest/")
+
+$ prog remove --force x y
+(remove #t ("x" "y"))
+
+$ prog remove
+prog: too few positional arguments: "file"
+
+Usage: prog [options] [--] <file>...
+
+Arguments:
+  <file>...  files to remove
+
+Options:
+      --force  do not ask
+  -h, --help   show this help message and exit
+[exit 2]
+
+$ prog frobnicate
+prog: unknown command frobnicate
+[exit 2]
+
+$ prog
+usage: prog copy|remove ...
+[exit 2]
+```
+
+* The first word is not an option of any parser; the program reads it itself and passes the rest on.
+
+## A verbosity level
+
+`-vvv` is not read as a count. A level is an option with a number, `-v 3`, with the accessor's default for when it is
+not given. The `:metavar` shows what the number is in the usage.
+
+```scheme
+#!r6rs
+(import (rnrs (6)) (rime command-line-options))
+
+(define-command-line-options parse
+  [:short "-v" :long "--verbose" :type int :metavar "level" :description "how much to print, 0 to 3"])
+
+(define option (parse-or-exit parse (cdr (command-line))))
+
+;; 0 when -v is not given
+(display "verbosity ")
+(display (option "verbose" 0))
+(newline)
+```
+
+```
+$ prog
+verbosity 0
+
+$ prog -v 3
+verbosity 3
+
+$ prog --verbose=2
+verbosity 2
+
+$ prog -v
+prog: too few arguments for option: "-v"
+
+Usage: prog [options]
+
+Options:
+  -v, --verbose <level>  how much to print, 0 to 3
+  -h, --help             show this help message and exit
+[exit 2]
+```
+
+* `-v` alone is `too few arguments for option`: the level has to be written.
+
+## Short forms
+
+The compact forms `-j4` and `-vq` are not read as `-j 4` and `-v -q`. A word that is not the name of a defined option is
+an ordinary word (see [Words that start with `-`](#words-that-start-with--)), so the compact forms become file names
+and the options are not set. Write the options separately:
+
+```scheme
+#!r6rs
+(import (rnrs (6)) (rime command-line-options))
+
+(define-command-line-options parse
+  [:short "-j" :long "--jobs" :type int :description "number of jobs"]
+  [:short "-v" :arity 0 :description "verbose"]
+  [:short "-q" :arity 0 :description "quiet"]
+  [:positional "file" :arity (0 +)])
+
+(define option (parse-or-exit parse (cdr (command-line))))
+(for-each (lambda (name) (write name) (display " => ") (write (option name)) (newline))
+          '("jobs" "v" "q" "file"))
+```
+
+```
+$ prog -j 4 -v -q a.txt
+"jobs" => 4
+"v" => #t
+"q" => #t
+"file" => ("a.txt")
+
+$ prog -j4 -vq a.txt
+"jobs" => #f
+"v" => #f
+"q" => #f
+"file" => ("-j4" "-vq" "a.txt")
+```
+
+* In the second run nothing is reported: `-j4` and `-vq` are two file names. A program that declares no `:positional` clause rejects them with `unexpected positional argument`.
+
+## Catching a wrong name early
+
+The names given to the accessor are checked when the accessor is called, not when the program is compiled. The macro that
+defines the parser does not know which variable holds the accessor, so it cannot see that `(option "cuont")` is a typo.
+Read every name the program uses once, right after the parse, so that a wrong name fails when the program starts,
+and not in a branch that runs once a month. The error says which names exist.
+
+```scheme
+#!r6rs
+(import (rnrs (6)) (rime command-line-options))
+
+(define-command-line-options parse
+  [:short "-i" :long "--input" :description "file to read"]
+  [:short "-c" :long "--count" :type int :description "repeat count"])
+
+(define option (parse-or-exit parse (cdr (command-line))))
+
+;; every name the program uses, read once right after the parse: a wrong name fails here, at start
+(for-each (lambda (name) (option name)) '("input" "count" "cuont"))
+
+;; ... the rest of the program
+(display "running\n")
+```
+
+```
+$ prog -i a.txt
+Exception in opt-parser: unknown option with irritants ("cuont" ("i" "input" "c" "count"))
+[exit 255]
+```
+
+* The same list works in a test of the program: parse an empty command line, read every name, and check that nothing raises.
 
 # A complete example
 
