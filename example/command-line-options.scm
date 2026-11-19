@@ -14,7 +14,7 @@
    :description "patterns to exclude, one or more, for example:\n  -e '*.tmp' '*.bak' '*~'\nAn argument that starts with a dash has to be escaped with a backslash."]
   [:short "-f" :long "--format" :choices ("json" "text" "yaml")
    :description "output format, one of the choices shown in the usage (the argument is checked)"]
-  [:long "--retries" :type int
+  [:long "--retries" :type int :default 3
    :description "how many times to try again when something fails (a long name only, no short name)"]
   [:positional "file" :arity (0 +)
    :description "the files to work on, any number of them"])
@@ -27,6 +27,6 @@
 (show "verbose" (option "verbose"))       ; #t or #f
 (show "count" (option "count"))           ; an integer, or #f
 (show "exclude" (option "exclude"))       ; a list of strings
-(show "retries" (option "retries"))       ; an integer, or #f
+(show "retries" (option "retries"))       ; an integer, 3 when not given
 (show "format" (option "format"))         ; one of the choices, or #f
 (show "file" (option "file"))             ; the positional words, a list of strings

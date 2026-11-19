@@ -48,8 +48,9 @@ optional second one, the [help hook](#help).
 | `:choices (...)`     | the arguments must be one of these, see [Choices](#choices) | none       |
 | `:description "..."` | text shown by `--help`                                     | empty      |
 | `:required`          | it is an error when the option is absent, see [Required options](#required-options) | optional |
+| `:default word`      | the value when the option is not given, see [Default values](#default-values) | none       |
 
-The keywords `:short :long :arity :type :choices :description :required :positional` are exported by the library, so import it whole
+The keywords `:short :long :arity :type :choices :description :required :positional :default` are exported by the library, so import it whole
 (`(import (rime command-line-options))`); `(only (rime command-line-options) define-command-line-options)`
 would leave them unbound and the clauses would be rejected.
 
@@ -241,6 +242,54 @@ Exception in opt-parser: too few positional arguments with irritant "source"
 
 How the words are given on the command line is in [Command line syntax](#command-line-syntax).
 
+## Default values
+
+`:default` is the value an option has when it is not on the command line. It is written as the
+words the user would have typed, a string, or a list of strings for an option that takes several
+arguments. The library converts them like the words of the command line, so `:type` and `:choices`
+apply to the default too, and the program gets the same kind of value in both cases.
+
+```scheme
+(define-command-line-options parse
+  [:short "-n" :long "--count" :type int :default "3" :description "repeat count"]
+  [:long "--format" :choices ("json" "text") :default "text" :description "output format"]
+  [:short "-e" :long "--exclude" :arity (1 +) :default ("*.tmp" "*.bak") :description "patterns to skip"])
+```
+
+```
+$ defaults
+"count" => 3
+"format" => "text"
+"exclude" => ("*.tmp" "*.bak")
+
+$ defaults -n 5 --format json -e x y
+"count" => 5
+"format" => "json"
+"exclude" => ("x" "y")
+
+$ defaults -h
+Usage: /tmp/demo/defaults.scm [options]
+
+Options:
+  -n, --count <int>          repeat count (default: 3)
+      --format {json,text}   output format (default: text)
+  -e, --exclude <string>...  patterns to skip (default: *.tmp, *.bak)
+  -h, --help                 show this help message and exit
+```
+
+* A number is accepted for a string: `:default 3` is `"3"`, and `:choices (1 2 4) :default 2` works.
+* An option that is given replaces its default, a list is not added to it.
+* The default is not read for escapes, it is not a typed word: `:default "-x"` is the text `-x`.
+* The words must fit the arity: one word for an option with arity `1`, between `min` and `max`
+  words otherwise, and `()` is a default for `(0 +)`. A flag cannot have a default, and an option cannot
+  have both `:default` and `:required`.
+* A default that does not fit `:type` or `:choices` is a syntax violation when the program is
+  compiled: `[:short "-n" :type int :default "x"]` is `:default is not a valid value for :type`.
+  With a `:type` procedure of your own, the default is converted when the parser runs, and a failure is
+  the usual `invalid argument value`.
+* `--help` shows the default after the first line of the description, `(default: 3)`. An empty list
+  shows nothing.
+
 # Reading the result
 
 `(parse arguments)` returns an accessor procedure, conventionally called `option`.
@@ -261,6 +310,8 @@ What an option gives depends on its arity:
 | `0`                      | `#t`                           | `#f`     |
 | `1` (also `(1 1)`)       | the converted value            | `#f`     |
 | anything else            | the list of converted values   | `()`     |
+
+The "absent" column is the value of an option that has no `:default`; with a default, it is the default.
 
 The words of a `:positional` clause follow the same table, so with arity `1` the word itself is
 returned, and with any other arity the list of words. An option that is given more than once keeps
@@ -603,7 +654,7 @@ The exported macro is just those two calls.
 | `__parse.sls`                       | phase 1, read: walks the clauses and fields by pattern matching, builds records |
 | `__ast.sls`                         | the `option-ast` and `positional-ast` records, and the semantic rules (names, arity, converter, duplicates) |
 | `__codegen.sls`                     | phase 2, write: generates the definition, which builds the same records again at runtime; never reads user syntax |
-| `__keywords.sls`                    | the field keywords `:short :long :arity :type :choices :description :required :positional` |
+| `__keywords.sls`                    | the field keywords `:short :long :arity :type :choices :description :required :positional :default` |
 | `__runtime.sls`                      | the runtime: parses the command line, builds the accessor, prints the usage; the `&command-line-error` condition and `parse-or-exit`; the builtin converters |
 
 A converter is an object with a label for the usage and a conversion that raises its own error, so the
