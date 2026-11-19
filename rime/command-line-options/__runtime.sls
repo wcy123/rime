@@ -10,6 +10,10 @@
           parse-result-help-asked?
           distribute-words
           check-required
+          parse-or-exit
+          command-line-error?
+          command-line-error-usage
+          format-command-line-error
           format-usage
           program-name
           default-on-help
@@ -48,14 +52,18 @@
       [(specs args) (parse-command-line specs args default-on-help '())]
       [(specs args on-help) (parse-command-line specs args on-help '())]
       [(specs args on-help positionals)
-       (let* ([result (scan-tokens specs
-                                   (lambda () (on-help (format-usage specs (program-name) positionals)))
-                                   args)]
-              [table (parse-result-table result)])
-         (unless (parse-result-help-asked? result)
-           (check-required specs table)
-           (store-positional-words! table (distribute-words positionals (parse-result-words result))))
-         (make-accessor specs positionals table))]))
+       ;; the library's own failures leave here with the usage of this parser attached
+       (with-usage
+        (lambda () (format-usage specs (program-name) positionals))
+        (lambda ()
+          (let* ([result (scan-tokens specs
+                                      (lambda () (on-help (format-usage specs (program-name) positionals)))
+                                      args)]
+                 [table (parse-result-table result)])
+            (unless (parse-result-help-asked? result)
+              (check-required specs table)
+              (store-positional-words! table (distribute-words positionals (parse-result-words result))))
+            (make-accessor specs positionals table))))]))
 
   ;; table          option-ast or positional-ast -> the converted arguments, of what was given
   ;; words          the positional words, in order, the ones before -- unescaped
@@ -205,8 +213,8 @@
               => (lambda (positional)
                    (value-of (positional-ast-min positional) (positional-ast-max positional)
                              (hashtable-ref table positional #f)))]
-             [else (fail "unknown option" key (unknown-name-hint specs positionals name))]))
-          (fail "invalid option key" key))))
+             [else (accessor-fail "unknown option" key (unknown-name-hint specs positionals name))]))
+          (accessor-fail "invalid option key" key))))
 
   ;; (unknown-name-hint specs positionals name) => the hint that the error carries after the name
   ;;   input   specs and positionals: what the parser defines; name: the name the program asked for
@@ -474,6 +482,55 @@
   ;; errors
   ;; ========================================
 
-  ;; details are the values the message is about, the option name, the text that did not fit, ...
+  ;; A problem with the command line: the condition is an &error with the who, the message and the
+  ;; details that an (error 'opt-parser ...) has, and it is also a &command-line-error, so that a
+  ;; program can tell it from its own errors. The usage is added where the parser is known, see
+  ;; with-usage; until then it is #f.
+  (define-condition-type &command-line-error &error
+    make-command-line-error command-line-error?
+    (usage command-line-error-usage))
+
+  ;; details are the values the message is about: the option name, the text that did not fit, ...
   (define (fail message . details)
-    (apply error 'opt-parser message details)))
+    (raise (command-line-condition message details #f)))
+
+  (define (command-line-condition message details usage)
+    (condition (make-error)
+               (make-who-condition 'opt-parser)
+               (make-message-condition message)
+               (make-irritants-condition details)
+               (make-command-line-error usage)))
+
+  ;; The mistakes of the program that reads the result, a name that does not exist, a key that is
+  ;; not a name: an ordinary error, not a problem with the command line.
+  (define (accessor-fail message . details)
+    (apply error 'opt-parser message details))
+
+  ;; (with-usage make-usage thunk): runs thunk; a command-line error raised in it is raised again
+  ;; with the usage text (from the procedure make-usage) in it. Other exceptions pass untouched.
+  (define (with-usage make-usage thunk)
+    (guard (e [(and (command-line-error? e) (not (command-line-error-usage e)))
+               (raise (command-line-condition (condition-message e) (condition-irritants e) (make-usage)))])
+      (thunk)))
+
+  ;; "prog: message: detail ...", a blank line, and the usage; what parse-or-exit prints
+  (define (format-command-line-error e)
+    (string-append
+     (program-name) ": " (condition-message e)
+     (if (null? (condition-irritants e))
+         ""
+         (string-append ": " (join (map write->string (condition-irritants e)) " ")))
+     "\n\n"
+     (or (command-line-error-usage e) "")))
+
+  (define (write->string datum)
+    (call-with-string-output-port (lambda (port) (write datum port))))
+
+  ;; (parse-or-exit parser arguments) => the accessor of (parser arguments); when the command line
+  ;; is wrong, prints the problem and the usage to the error port and exits with 2. Errors that are
+  ;; not about the command line are not caught.
+  (define (parse-or-exit parser arguments)
+    (guard (e [(command-line-error? e)
+               (display (format-command-line-error e) (current-error-port))
+               (exit 2)])
+      (parser arguments))))
