@@ -318,12 +318,12 @@
       (CHECK eqv? (option 'number-of-positional-argument) 2)
       (CHECK equal? (option 0) "--")))
 
-  (define-test test-everything-after-first-positional-is-positional
+  (define-test test-options-after-the-first-positional-are-options
     (let ([option (parse '("a" "-v" "--count" "5"))])
-      (CHECK eq? (option "-v") 'absent)
-      (CHECK eq? (option "-n") #f)
-      (CHECK eqv? (option 'number-of-positional-argument) 4)
-      (CHECK equal? (option 1) "-v")))
+      (CHECK eq? (option "-v") 'present)
+      (CHECK eqv? (option "-n") 5)
+      (CHECK eqv? (option 'number-of-positional-argument) 1)
+      (CHECK equal? (option 0) "a")))
 
   (define-test test-positional-index-out-of-range
     (let ([option (parse '("a"))])
@@ -1097,12 +1097,11 @@
       (CHECK eq? shown #f)
       (CHECK equal? (option 0) "-h")))
 
-  (define-test test-help-after-positional-is-positional
-    (let* ([shown #f]
-           [option (parse-command-line usage-specs '("a" "--help")
-                                       (lambda (text) (set! shown text)))])
-      (CHECK eq? shown #f)
-      (CHECK equal? (option 1) "--help")))
+  (define-test test-help-after-positional-shows-the-usage
+    (let ([shown #f])
+      (parse-command-line usage-specs '("a" "--help")
+                          (lambda (text) (set! shown text)))
+      (CHECK eq? (and shown #t) #t)))
 
   (define-test test-help-as-option-argument-is-escapable
     (let* ([shown #f]
@@ -1394,9 +1393,4 @@
     (CHECK equal? (mixed '("-emit=a" "f" "-emit=b")) '("b" absent #f ("f"))))
 
   (define-test test-mixed-unknown-option-after-positional
-    (CHECK equal? (error-message (lambda () (parse-mixed '("f" "--nope")))) "unknown option"))
-
-  (define-test test-mixed-help-after-positional
-    (let ([text #f])
-      (parse-command-line usage-specs '("a" "--help") (lambda (t) (set! text t)))
-      (CHECK eq? (and text #t) #t))))
+    (CHECK equal? (error-message (lambda () (parse-mixed '("f" "--nope")))) "unknown option")))

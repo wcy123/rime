@@ -28,7 +28,7 @@ A runnable version is in `example/command-line-options.scm`.
 # Defining options
 
 ```scheme
-(define-command-line-options <parser> [:intermixed]
+(define-command-line-options <parser>
   [<field> ...]
   ...)
 ```
@@ -45,7 +45,7 @@ the list of command line arguments (without the program name).
 | `:choices (...)`     | the arguments must be one of these, see [Choices](#choices) | none       |
 | `:description "..."` | text shown by `--help`                                     | empty      |
 
-The keywords `:short :long :arity :type :choices :description :intermixed` are exported by the library, so import it whole
+The keywords `:short :long :arity :type :choices :description` are exported by the library, so import it whole
 (`(import (rime command-line-options))`); `(only (rime command-line-options) define-command-line-options)`
 would leave them unbound and the clauses would be rejected.
 
@@ -193,40 +193,23 @@ prog --exclude=a,b,c          ; several arguments with =, separated by commas
 
 ## Positional arguments
 
-The first word that is not an option, and is not consumed as an argument of an option, starts the
-positional arguments. Everything after that word is positional, even if it looks like an option.
-`--` ends option parsing explicitly, everything after it is positional and kept as is.
+Options and positional words can come in any order. A word that is an option is an option wherever it
+is, and a word that is not (and is not consumed as an argument of an option) is positional.
+The positional words keep their order.
+`--` ends option parsing explicitly, everything after it is positional and kept as is, and
+the `--` itself is dropped.
 
 ```
 prog -v in.txt out.txt        ; positional: "in.txt" "out.txt"
+prog in.txt -v out.txt        ; positional: "in.txt" "out.txt", -v is present
 prog -v -- -x                 ; positional: "-x"
-prog in.txt -v                ; positional: "in.txt" "-v"   (-v is NOT the flag here)
+prog in.txt -- -v             ; positional: "in.txt" "-v"   (-v is NOT the flag here)
 ```
 
-## Options after positional words: `:intermixed`
-
-By default the first positional word ends the options. Write `:intermixed` after the parser name to
-mix options and positional words, as GNU `getopt` and Python's `parse_intermixed_args` do:
-
-```scheme
-(define-command-line-options parse :intermixed
-  [:short "-emit" :long "--emit" :description "action"]
-  [:short "-opt"  :long "--opt"  :arity 0 :description "run the optimizer"])
-```
-
-An option-like word is an option wherever it is, and the positional words keep their order:
-
-```
-prog example.toy --emit=ast        ; --emit "ast", positional: "example.toy"
-prog example.toy -emit ast -opt    ; --emit "ast", -opt present, positional: "example.toy"
-prog a -opt b -opt c               ; positional: "a" "b" "c"
-prog example.toy -- --emit=ast     ; positional: "example.toy" "--emit=ast"   (the `--` is dropped)
-```
-
-Everything else is as in the default mode: `--` ends the options, `\-x` and a lone `-` are values,
-`-h` and `--help` work anywhere, an option with arity `(min max)` still takes the following ordinary
-words until it has `max` of them (with `(1 +)`, `prog a -e x y b` gives `-e` the words `"x" "y" "b"`),
-and an option given twice keeps its last occurrence.
+An option with arity `(min max)` takes the following ordinary words until it has `max` of them, or the
+next word is an option or `--`. With arity `(1 +)`, `prog a -e x y b` gives `-e` the words `"x" "y" "b"`
+and the positional word `"a"`; write `prog a -e x y -- b` to keep `b` positional.
+An option given twice keeps its last occurrence.
 
 ## Arguments starting with `-`
 
@@ -340,6 +323,16 @@ $ grep-lite -v --count 3 -r 0.25 -c yes -e a b c -w 2 -t x in.txt out.txt
 "-e" => ("a" "b" "c")
 "-w" => (2)
 "-t" => "<x>"
+positionals: ("in.txt" "out.txt")
+
+$ grep-lite in.txt -v -n 3 out.txt
+"-v" => present
+"-n" => 3
+"-r" => #f
+"-c" => #f
+"-e" => ()
+"-w" => ()
+"-t" => #f
 positionals: ("in.txt" "out.txt")
 
 $ grep-lite --count=3 --exclude=a,b,c --window=1,2 -- -v file
