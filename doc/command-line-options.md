@@ -278,10 +278,25 @@ prog --exclude=a,b,c          ; several arguments with =, separated by commas
 
 * An option with `(min max)` arguments takes the following words until it has `max` of them, or the
   next word looks like an option, or the word is `--`. Fewer than `min` is an error.
-* With `=`, the arguments are split at every comma and counted exactly, `--count=1,2` is
-  `too many arguments for option`. This is the way to give an optional argument without
-  ambiguity, `--window=2`.
+* With `=`, an option that takes several arguments (`max` above 1) splits the text at every comma and
+  counts the arguments exactly, `--window=1,2`, `--exclude=a,b,c`. This is the way to give an optional
+  argument without ambiguity, `--window=2`. An option that takes one argument gets the whole text
+  after the first `=`, commas included, so `--title="Hello, World"` is the one argument `Hello, World`.
 * A flag does not accept `=`.
+
+```
+$ prog --title="Hello, World"      ; one argument, the comma is part of it
+"title" => "Hello, World"
+
+$ prog --exclude=a,b,c             ; several arguments, split at the commas
+"exclude" => ("a" "b" "c")
+
+$ prog --window=1,2
+"window" => (1 2)
+
+$ prog --count=1,2                 ; --count takes one integer, and 1,2 is not one
+Exception in opt-parser: invalid argument value with irritants ("--count" "1,2")
+```
 
 ## Positional words
 
@@ -360,7 +375,7 @@ Catch it with `guard`; the library never exits by itself except for `-h`.
 |------------------------------------|-------------------------------------------------------|------------------------|
 | `unknown option`                   | an option-like word that is not defined               | the word               |
 | `too few arguments for option`     | fewer than `min` arguments                            | the option name        |
-| `too many arguments for option`    | `--name=a,b,c` with more than `max` items             | the option name        |
+| `too many arguments for option`    | `--name=a,b,c` with more than `max` items, for an option that takes several arguments | the option name        |
 | `option does not take arguments`   | `--flag=1` on an arity 0 option                       | the option name        |
 | `invalid argument value`           | the conversion failed                                 | the option name, the text |
 | `argument must be one of the choices` | the argument is not one of the `:choices`          | the option name, the text, the choices |
@@ -461,8 +476,11 @@ Exception in opt-parser: too few arguments for option with irritant "-n"
 $ grep-lite --nope
 Exception in opt-parser: unknown option with irritant "--nope"
 
+$ grep-lite --window=1,2,3
+Exception in opt-parser: too many arguments for option with irritant "--window"
+
 $ grep-lite --count=1,2
-Exception in opt-parser: too many arguments for option with irritant "--count"
+Exception in opt-parser: invalid argument value with irritants ("--count" "1,2")
 
 $ grep-lite --verbose=1
 Exception in opt-parser: option does not take arguments with irritant "--verbose"

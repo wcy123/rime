@@ -52,14 +52,16 @@
              (scan (parse-option (car tokens) (cdr tokens)))]
             [else (cons (unescape (car tokens)) (scan (cdr tokens)))]))
 
-         ;; token is "-x", "--long" or "-x=a,b" / "--long=a,b"; returns the unconsumed tokens
+         ;; token is "-x", "--long" or "-x=a,b" / "--long=a,b"; returns the unconsumed tokens.
+         ;; After =, the text is split at the commas only for an option that takes several arguments.
          (define (parse-option token rest)
            (let* ([equals (index-of #\= token)]
                   [name (if equals (substring token 0 equals) token)]
                   [spec (or (find-spec-by-token specs name) (fail "unknown option" token))])
              (cond
               [equals
-               (let ([items (split-commas (substring token (+ equals 1) (string-length token)))])
+               (let* ([text (substring token (+ equals 1) (string-length token))]
+                      [items (if (> (option-ast-max spec) 1) (split-commas text) (list text))])
                  (cond [(= 0 (option-ast-max spec))
                         (fail "option does not take arguments" name)]
                        [(< (length items) (option-ast-min spec))
