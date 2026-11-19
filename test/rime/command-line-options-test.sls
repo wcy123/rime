@@ -405,21 +405,25 @@
   ;; parse errors
   ;; ========================================
 
-  (define-test test-error-unknown-short-option
-    (CHECK equal? (error-message (lambda () (parse '("-z"))))
-           "unknown option"))
+  ;; a word is an option only when it is the name of a defined option: any other word, whatever it
+  ;; starts with, is an ordinary word (a positional word, or an argument of the option before it)
+  (define-test test-an-undefined-dash-word-is-a-positional-word
+    (CHECK equal? ((parse '("-z")) "args") '("-z"))
+    (CHECK equal? ((parse '("--nope")) "args") '("--nope"))
+    (CHECK equal? ((parse '("--nope=1")) "args") '("--nope=1"))
+    (CHECK equal? ((parse '("-vq")) "args") '("-vq"))
+    (CHECK equal? ((parse '("a" "-z" "b")) "args") '("a" "-z" "b")))
 
-  (define-test test-error-unknown-long-option
-    (CHECK equal? (error-message (lambda () (parse '("--nope"))))
-           "unknown option"))
+  (define-test test-an-undefined-dash-word-is-an-error-when-there-is-no-positional
+    (CHECK equal? (error-message (lambda () (parse-none '("-z")))) "unexpected positional argument")
+    (CHECK equal? (error-irritants (lambda () (parse-none '("--nope=1")))) '("--nope=1")))
 
-  (define-test test-error-unknown-long-option-with-equals
-    (CHECK equal? (error-message (lambda () (parse '("--nope=1"))))
-           "unknown option"))
+  (define-test test-an-undefined-dash-word-is-an-argument-of-the-option-before-it
+    (CHECK equal? ((parse '("-f" "a" "--nope" "b")) "f") '("a" "--nope" "b"))
+    (CHECK equal? ((parse '("-s" "-z")) "s") "-z"))
 
-  (define-test test-error-clustered-short-options-unsupported
-    (CHECK equal? (error-message (lambda () (parse '("-vq"))))
-           "unknown option"))
+  (define-test test-help-with-an-equals-is-not-the-help
+    (CHECK equal? ((parse '("-h=x")) "args") '("-h=x")))
 
   ;; ========================================
   ;; negative numbers are values, not options
@@ -462,11 +466,10 @@
     (CHECK eqv? ((parse '("-n" "\\-5")) "n") -5)
     (CHECK equal? ((parse '("\\-5")) "args") '("-5")))
 
-  (define-test test-words-that-are-not-numbers-are-still-options
+  (define-test test-words-that-are-not-numbers-are-words-too
     (for-each
      (lambda (word)
-       (CHECK equal? (list word (error-message (lambda () (parse (list word)))))
-              (list word "unknown option")))
+       (CHECK equal? (list word ((parse (list word)) "args")) (list word (list word))))
      '("-5a" "-0x10" "-1/2" "-inf" "-e5" "-1e" "-1." "-." "-1.2.3" "-+5" "-5-" "--5" "-1e+" "-i")))
 
   (define-test test-a-word-like-a-number-but-not-a-number-can-be-escaped
@@ -1533,8 +1536,8 @@
   (define-test test-mixed-last-occurrence-wins
     (CHECK equal? (mixed '("-emit=a" "f" "-emit=b")) '("b" absent #f ("f"))))
 
-  (define-test test-mixed-unknown-option-after-positional
-    (CHECK equal? (error-message (lambda () (parse-mixed '("f" "--nope")))) "unknown option"))
+  (define-test test-mixed-undefined-dash-word-after-positional
+    (CHECK equal? ((parse-mixed '("f" "--nope")) "files") '("f" "--nope")))
   ;; ========================================
   ;; (option 'help), the usage as a string
   ;; ========================================
