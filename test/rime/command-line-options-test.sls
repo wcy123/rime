@@ -1674,8 +1674,8 @@
     (CHECK equal? ((versioned-words '("--" "--version" "-V")) "words") '("--version" "-V")))
 
   (define-test test-version-is-not-the-short-name-v
-    ;; -v is the name of a verbose flag in many programs, it is never the version
-    (CHECK equal? (error-message (lambda () (versioned-words '("-v")))) "unknown option"))
+    ;; -v is the name of a verbose flag in many programs, it is never the version: here it is just a word
+    (CHECK equal? ((versioned-words '("-v")) "words") '("-v")))
 
   (define-test test-version-and-help-are-both-built-in
     (when run-capturing-exit
@@ -1691,9 +1691,10 @@
       (CHECK equal? shown (string-append (program-name) " 1.2.3\n"))))
 
   (define-test test-without-a-version-there-is-no-version-option
-    (CHECK equal? (error-message (lambda () (parse-small '("--version")))) "unknown option")
-    (CHECK equal? (error-message (lambda () (parse-small '("-V")))) "unknown option")
-    (CHECK equal? (error-message (lambda () (parse-about '("--version")))) "unknown option")
+    ;; without a version, --version and -V are ordinary words
+    (CHECK equal? (error-message (lambda () (parse-small '("--version")))) "unexpected positional argument")
+    (CHECK equal? (error-message (lambda () (parse-small '("-V")))) "unexpected positional argument")
+    (CHECK equal? ((parse-about '("--version" "x")) "source") '("--version"))
     (CHECK eq? (contains? ((parse-small '()) 'help) "--version") #f))
 
   (define-test test-the-names-of-the-version-are-not-lookup-names
