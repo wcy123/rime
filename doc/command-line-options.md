@@ -266,6 +266,54 @@ The words of a `:positional` clause follow the same table, so with arity `1` the
 returned, and with any other arity the list of words. An option that is given more than once keeps
 its last occurrence. Asking for a name that was not defined, or any other kind of key, raises an error.
 
+## A default for an option that was not given
+
+`(option "count" 3)` is the same as `(option "count")`, except that it gives `3` when the option was not
+on the command line. The default is your own Scheme value: it is returned as it is, not converted and not
+checked against the type or the choices, so write `3`, not `"3"`. It can be computed when the program runs,
+`(option "output" (current-directory))`.
+
+```scheme
+(define-command-line-options parse
+  [:short "-n" :long "--count" :type int :description "repeat count"]
+  [:short "-f" :long "--format" :choices ("json" "text") :description "output format"]
+  [:short "-b" :long "--bold" :type bool :description "bold text"]
+  [:short "-o" :long "--output" :arity (0 +) :description "output files"]
+  [:positional "file" :arity (0 +)])
+
+(define option (parse (cdr (command-line))))
+(option "count" 1)  (option "format" "text")  (option "bold" 'unset)  (option "output" '("-"))  (option "file" '("stdin"))
+```
+
+```
+$ prog
+"count" => 1
+"format" => "text"
+"bold" => unset
+"output" => ("-")
+"file" => ("stdin")
+
+$ prog -n 5 -f json -b off -o=a.txt report.txt
+"count" => 5
+"format" => "json"
+"bold" => #f
+"output" => ("a.txt")
+"file" => ("report.txt")
+
+$ prog -o
+"count" => 1
+"format" => "text"
+"bold" => unset
+"output" => ()
+"file" => ("stdin")
+```
+
+* The default is used only when the option was not given. `-o` alone is given, with no arguments, so it
+  gives `()` and not the default. A positional that got no words counts as not given.
+* It tells "not given" from "given as false": `-b off` gives `#f`, and no `-b` gives the default `unset`.
+* The default does not hide a mistake: `(option "nope" 1)` is still `unknown option`.
+* The usage text cannot show a default. Say it in the `:description` if you want it shown.
+
 # Command line syntax
 
 ```

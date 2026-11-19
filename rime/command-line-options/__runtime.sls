@@ -198,9 +198,13 @@
     (exit 0))
 
   ;; the procedure the user gets: (option "count"), (option "file"), (option "help"); the names are
-  ;; those of the options without their dashes, the name of the positional, and "help" for the usage
+  ;; those of the options without their dashes, the name of the positional, and "help" for the usage.
+  ;; (option "count" 3) is the same, but it gives 3 when the option was not given on the command line:
+  ;; the value is the program's own, it is not converted or checked. An option that was given with
+  ;; no arguments, -o alone, was given, and a positional that got no words was not.
   (define (make-accessor specs positionals table)
-    (lambda (key)
+    ;; default is '() when the program gave none, and a list of the one default value when it did
+    (define (lookup key default)
       (if (or (string? key) (symbol? key))
           (let ([name (if (symbol? key) (symbol->string key) key)])
             (cond
@@ -208,13 +212,20 @@
               (format-usage specs (program-name) positionals)]
              [(find-spec-by-name specs name)
               => (lambda (spec)
-                   (value-of (option-ast-min spec) (option-ast-max spec) (hashtable-ref table spec #f)))]
+                   (if (and (pair? default) (not (hashtable-contains? table spec)))
+                       (car default)
+                       (value-of (option-ast-min spec) (option-ast-max spec) (hashtable-ref table spec #f))))]
              [(find-positional positionals name)
               => (lambda (positional)
-                   (value-of (positional-ast-min positional) (positional-ast-max positional)
-                             (hashtable-ref table positional #f)))]
+                   (if (and (pair? default) (null? (hashtable-ref table positional '())))
+                       (car default)
+                       (value-of (positional-ast-min positional) (positional-ast-max positional)
+                                 (hashtable-ref table positional #f))))]
              [else (accessor-fail "unknown option" key (unknown-name-hint specs positionals name))]))
-          (accessor-fail "invalid option key" key))))
+          (accessor-fail "invalid option key" key)))
+    (case-lambda
+      [(key) (lookup key '())]
+      [(key default) (lookup key (list default))]))
 
   ;; (unknown-name-hint specs positionals name) => the hint that the error carries after the name
   ;;   input   specs and positionals: what the parser defines; name: the name the program asked for
