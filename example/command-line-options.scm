@@ -16,6 +16,8 @@
    :description "output format, one of the choices shown in the usage (the argument is checked)"]
   [:long "--retries" :type int
    :description "how many times to try again when something fails (a long name only, no short name)"]
+  [:short "-d" :long "--debug" :arity 0 :count
+   :description "debug output, each time more: -d, -dd, -ddd (a counted flag)"]
   [:positional "file" :arity (0 +)
    :description "the files to work on, any number of them"])
 
@@ -29,4 +31,5 @@
 (show "exclude" (option "exclude"))       ; a list of strings
 (show "retries" (option "retries"))       ; an integer, or #f
 (show "format" (option "format"))         ; one of the choices, or #f
+(show "debug" (option "debug"))           ; how many times it was given, 0 when it was not
 (show "file" (option "file"))             ; the positional words, a list of strings

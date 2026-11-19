@@ -48,9 +48,61 @@
              (set! help-asked? #t)
              (on-help (format-usage specs (program-name) positionals))
              '()]
+            [(short-form? (car tokens))
+             (scan-short-form (car tokens) (cdr tokens))]
             [(option-like? (car tokens))
              (scan (parse-option (car tokens) (cdr tokens)))]
             [else (cons (unescape (car tokens)) (scan (cdr tokens)))]))
+
+         ;; A word with one dash and more than one letter, "-vq" or "-j4", that is not the name of an
+         ;; option ("-emit" and "-emit=mlir" are, when "-emit" is defined) is read letter by letter.
+         (define (short-form? token)
+           (and (option-like? token)
+                (> (string-length token) 2)
+                (not (char=? (string-ref token 1) #\-))
+                (not (find-spec-by-token specs (let ([equals (index-of #\= token)])
+                                                 (if equals (substring token 0 equals) token))))))
+
+         ;; "-vq" is "-v -q", every letter before the last has to be a flag. A letter that takes
+         ;; arguments ends the word: the text after it is its first argument, "-vj4" is "-v -j 4",
+         ;; and without text it takes the following words as usual, "-vj 4". "-h" shows the help.
+         ;; Returns the positional words, like scan.
+         (define (scan-short-form token rest)
+           (let loop ([i 1])
+             (if (= i (string-length token))
+                 (scan rest)
+                 (let ([letter (string #\- (string-ref token i))])
+                   (cond
+                    [(string=? letter "-h")
+                     (show-help!)
+                     '()]
+                    [(find-spec-by-token specs letter)
+                     => (lambda (spec)
+                          (if (= 0 (option-ast-max spec))
+                              (begin (store! spec letter '())
+                                     (loop (+ i 1)))
+                              (scan (take-short-arguments spec letter
+                                                          (substring token (+ i 1) (string-length token))
+                                                          rest))))]
+                    [else (fail "unknown option" token)])))))
+
+         ;; `text` is what follows the letter in the word; returns the unconsumed tokens
+         (define (take-short-arguments spec letter text rest)
+           (cond
+            [(string=? text "")
+             (parse-option letter rest)]
+            [(char=? (string-ref text 0) #\=)
+             (parse-option (string-append letter text) rest)]
+            [else
+             (let-values ([(items remaining) (take-arguments rest (- (option-ast-max spec) 1))])
+               (when (< (+ 1 (length items)) (option-ast-min spec))
+                 (fail "too few arguments for option" letter))
+               (store! spec letter (cons text items))
+               remaining)]))
+
+         (define (show-help!)
+           (set! help-asked? #t)
+           (on-help (format-usage specs (program-name) positionals)))
 
          ;; token is "-x", "--long" or "-x=a,b" / "--long=a,b"; returns the unconsumed tokens
          (define (parse-option token rest)
@@ -85,8 +137,11 @@
          (define (argument-token? token)
            (not (or (string=? token "--") (option-like? token))))
 
+         ;; a counted flag keeps how many times it was given, every other option its arguments
          (define (store! spec name items)
-           (hashtable-set! table spec (convert-items spec name items)))
+           (if (option-ast-count spec)
+               (hashtable-set! table spec (+ 1 (hashtable-ref table spec 0)))
+               (hashtable-set! table spec (convert-items spec name items))))
 
          ;; the converter reports its own failure, it is given the name of the option for that
          (define (convert-items spec name items)
@@ -162,7 +217,9 @@
               (format-usage specs (program-name) positionals)]
              [(find-spec-by-name specs name)
               => (lambda (spec)
-                   (value-of (option-ast-min spec) (option-ast-max spec) (hashtable-ref table spec #f)))]
+                   (if (option-ast-count spec)
+                       (hashtable-ref table spec 0)
+                       (value-of (option-ast-min spec) (option-ast-max spec) (hashtable-ref table spec #f))))]
              [(find-positional positionals name)
               => (lambda (positional)
                    (value-of (positional-ast-min positional) (positional-ast-max positional)

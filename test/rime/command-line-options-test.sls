@@ -502,8 +502,8 @@
     (let ([option (parse-counted '("-vvq"))])
       (CHECK eqv? (option "v") 2)
       (CHECK eq? (given? (option "q")) #t))
-    (let ([option (parse-counted '("-vn3v"))])
-      (CHECK eqv? (option "v") 1)
+    (let ([option (parse-counted '("-vvn3" "-v"))])
+      (CHECK eqv? (option "v") 3)
       (CHECK eqv? (option "n") 3)))
 
   (define-test test-a-flag-that-is-not-counted-stays-a-flag

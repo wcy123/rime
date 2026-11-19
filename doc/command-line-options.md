@@ -47,10 +47,16 @@ function of one argument, the list of command line arguments (without the progra
 | `:choices (...)`     | the arguments must be one of these, see [Choices](#choices) | none       |
 | `:description "..."` | text shown by `--help`                                     | empty      |
 | `:required`          | it is an error when the option is absent, see [Required options](#required-options) | optional |
+| `:count`             | a flag that gives how many times it was given, see [Counted flags](#counted-flags) | not counted |
 
-The keywords `:short :long :arity :type :choices :description :required :positional` are exported by the library, so import it whole
+The keywords `:short :long :arity :type :choices :description :required :count :positional` are exported by the library, so import it whole
 (`(import (rime command-line-options))`); `(only (rime command-line-options) define-command-line-options)`
 would leave them unbound and the clauses would be rejected.
+
+`(rime loop)` has a `:count` keyword too. A program that imports both libraries whole is rejected on
+Chez (`multiple definitions for :count`; Guile takes the last import). Leave one of them out,
+`(except (rime command-line-options) :count)`, or rename it, `(rename (rime command-line-options) (:count :opt-count))`,
+and write the renamed keyword in the clause.
 
 Fields can be written in any order. An option needs a `:short` name, a `:long` name, or both.
 Mistakes in the definition (unknown field, no name, duplicated name, `:type` on a flag, `min > max`, ...) are reported when the program is compiled,
@@ -60,7 +66,8 @@ as syntax violations.
 
 Option names are strings: `:short "-b"` (a single dash) and `:long "--long-name"` (two dashes).
 Names must not contain `=`, `,` or whitespace. `-h` and `--help` are reserved.
-There is no clustering, `-vq` is an unknown option, not `-v -q`.
+A short name with one letter can be written in the forms of [Short options](#short-options):
+`-vq` is `-v -q`, and `-j4` is `-j 4`. A short name with several letters (`-emit`) is a name as a whole.
 
 The program reads an option by its name without the dashes: `"b"` for `:short "-b"`, `"long-name"`
 for `:long "--long-name"`. These names must be different for all options, so `[:short "-x"]` and
@@ -178,7 +185,23 @@ missing required option: ("--input")
 An option counts as given when it is on the command line, even with no arguments:
 a required `-o` with arity `(0 +)` is satisfied by `-o` alone. `-h` and `--help` need no
 required option, they print the usage first. A flag (arity `0`) cannot be `:required`, that is
-a syntax violation when the program is compiled.
+a syntax violation when the program is compiled; only a [counted flag](#counted-flags) can, and
+then it has to be given at least once.
+
+## Counted flags
+
+`:count` has no value, and only a flag (arity `0`) can have it. The program gets how many times the
+flag was given, `0` when it was not given, instead of `present` or `absent`. This is the way to write
+a level of verbosity: `-v` is 1, `-vv` is 2, `-v -v -v` is 3.
+
+```scheme
+(define-command-line-options parse
+  [:short "-v" :long "--verbose" :arity 0 :count :description "more details, each time more"])
+```
+
+The count goes up for every form of the flag, `-v`, `--verbose` and a letter in a cluster
+(see [Short options](#short-options)). A counted flag can be `:required`, then it has to be given at least once.
+A flag without `:count` is still `present` or `absent`, however many times it is given.
 
 ## Positional arguments
 
@@ -257,6 +280,7 @@ What an option gives depends on its arity:
 | arity                    | given                          | absent   |
 |--------------------------|--------------------------------|----------|
 | `0`                      | `present`                      | `absent` |
+| `0` with `:count`        | how many times it was given    | `0`      |
 | `1` (also `(1 1)`)       | the converted value            | `#f`     |
 | anything else            | the list of converted values   | `()`     |
 
@@ -272,6 +296,8 @@ prog -n 3                     ; short name, argument follows
 prog --count 3                ; long name, argument follows
 prog --count=3                ; long name with =
 prog -n=3                     ; short name with =
+prog -n3                      ; short name with the argument attached
+prog -vq                      ; two flags, -v -q
 prog -e a b c                 ; several arguments
 prog --exclude=a,b,c          ; several arguments with =, separated by commas
 ```
@@ -282,6 +308,88 @@ prog --exclude=a,b,c          ; several arguments with =, separated by commas
   `too many arguments for option`. This is the way to give an optional argument without
   ambiguity, `--window=2`.
 * A flag does not accept `=`.
+
+## Short options
+
+A short name with one letter (`-v`, `-j`) can be written in two more ways.
+
+* **The argument attached to the letter**, `-j4` is `-j 4`. The text after the letter is the first
+  argument. An option with more arguments takes the following words as usual, `-n5 6` is `-n 5 6`.
+  `-j=4` is still the form with `=`.
+* **Several letters in a word**, `-vq` is `-v -q`. Every letter but the last has to be a flag. A letter
+  that takes arguments ends the word, the text after it is its first argument: `-vqj4` is `-v -q -j 4`,
+  and `-vj 4` is `-v -j 4`. `-vh` shows the help.
+
+```
+$ short-forms -j4
+"verbose" => 0
+"quiet" => 0
+"jobs" => 4
+"output" => #f
+"file" => ()
+
+$ short-forms -vvq
+"verbose" => 2
+"quiet" => 1
+"jobs" => #f
+"output" => #f
+"file" => ()
+
+$ short-forms -vvj4 a.txt
+"verbose" => 2
+"quiet" => 0
+"jobs" => 4
+"output" => #f
+"file" => ("a.txt")
+
+$ short-forms -vqoout.txt
+"verbose" => 1
+"quiet" => 1
+"jobs" => #f
+"output" => "out.txt"
+"file" => ()
+
+$ short-forms -vv -v --verbose
+"verbose" => 4
+"quiet" => 0
+"jobs" => #f
+"output" => #f
+"file" => ()
+
+$ short-forms -vz
+Exception in opt-parser: unknown option with irritant "-vz"
+
+$ short-forms -j
+Exception in opt-parser: too few arguments for option with irritant "-j"
+```
+
+The program of these transcripts:
+
+```scheme
+#!r6rs
+(import (rnrs (6)) (rime command-line-options))
+
+(define-command-line-options parse
+  [:short "-v" :long "--verbose" :arity 0 :count :description "more details, each time more"]
+  [:short "-q" :long "--quiet" :arity 0 :count :description "less output, each time less"]
+  [:short "-j" :long "--jobs" :type int :description "number of jobs"]
+  [:short "-o" :long "--output" :description "output file"]
+  [:positional "file" :arity (0 +)])
+
+(define option (parse (cdr (command-line))))
+(for-each (lambda (name) (write name) (display " => ") (write (option name)) (newline))
+          '("verbose" "quiet" "jobs" "output" "file"))
+```
+
+A word is first compared with the names that are defined, as a whole. Only when no option has that
+name is it read letter by letter. So a name with several letters is never taken apart: with `-emit`
+defined, `-emit` is that option even if `-e` is defined too, and with `-ab` defined next to the flags
+`-a` and `-b`, `-ab` is the option `-ab`, not `-a -b`. Every command line that was valid before the
+short forms still means the same. A word that is not a name and whose first letter is not an option
+is `unknown option`, with the word as it was typed (`-vz`). Long names (`--jobs`) are never
+split or attached, and a word that starts with `--` is never a cluster. Two things to know when
+choosing names: a program that defines `-e` with an argument reads `-emi` as `-e` with the text
+`mi`, and `\-vq` (escaped) is still a positional word.
 
 ## Positional words
 
@@ -482,7 +590,7 @@ The exported macro is just those two calls.
 | `__parse.sls`                       | phase 1, read: walks the clauses and fields by pattern matching, builds records |
 | `__ast.sls`                         | the `option-ast` and `positional-ast` records, and the semantic rules (names, arity, converter, duplicates) |
 | `__codegen.sls`                     | phase 2, write: generates the definition, which builds the same records again at runtime; never reads user syntax |
-| `__keywords.sls`                    | the field keywords `:short :long :arity :type :choices :description :required :positional` |
+| `__keywords.sls`                    | the field keywords `:short :long :arity :type :choices :description :required :count :positional` |
 | `__runtime.sls`                      | the runtime: parses the command line, builds the accessor, prints the usage; the builtin converters |
 
 A converter is an object with a label for the usage and a conversion that raises its own error, so the

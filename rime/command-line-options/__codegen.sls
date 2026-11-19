@@ -31,6 +31,8 @@
   ;; an expression that builds the same option-ast again, at runtime, for the runtime (__runtime.sls)
   ;; to work with: the values are emitted as they are, and the source is not needed there.
   ;; The converter is emitted as the AST has it, #f (no converter) means the text as it is.
+  ;; A counted flag is the only one that is built differently, so that the call of every other
+  ;; option stays as it is.
   (define (option->spec-expression option)
     (with-syntax ([short (datum->syntax #'here (option-ast-short option))]
                   [long (datum->syntax #'here (option-ast-long option))]
@@ -39,4 +41,6 @@
                   [converter (or (option-ast-converter option) #'#f)]
                   [description (datum->syntax #'here (option-ast-description option))]
                   [required (datum->syntax #'here (option-ast-required option))])
-      #'(make-option-ast short long min max converter description #f required))))
+      (if (option-ast-count option)
+          #'(make-counted-option-ast short long min max converter description #f required)
+          #'(make-option-ast short long min max converter description #f required)))))

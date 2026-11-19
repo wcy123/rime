@@ -86,14 +86,14 @@
   ;;   clause = [:positional "file" :arity (1 +) :type int :description "input files"]
   ;;   => name "file", min 1, max unlimited, converter (builtin-converter 'int), description "input files"
   ;;   The fields are those of an option without the names: :arity :type :choices :description.
-  ;;   :short, :long and :required are for options and are a violation here.
+  ;;   :short, :long, :required and :count are for options and are a violation here.
   (define (read-positional-clause clause)
     (let ([positional (read-positional-fields clause (make-unbound-positional-ast clause))])
       (positional-ast-fill-defaults! positional)
       positional))
 
   (define (read-positional-fields fields positional)
-    (syntax-case fields (:positional :arity :type :choices :description :short :long :required)
+    (syntax-case fields (:positional :arity :type :choices :description :short :long :required :count)
       [() positional]
       [(:positional value . rest)
        (begin
@@ -126,6 +126,8 @@
        (violation ":long is a field of an option, not of a :positional clause" fields)]
       [(:required . _)
        (violation ":required is a field of an option, not of a :positional clause" fields)]
+      [(:count . _)
+       (violation ":count is a field of an option, not of a :positional clause" fields)]
       [(bad . _)
        (violation "unknown field, or field without a value (expected :positional :arity :type :choices :description)"
                   #'bad)]
@@ -143,7 +145,7 @@
   ;;   (read-fields #'(:type int :long "--count") option)
   ;;   => long = "--count", converter = (builtin-converter 'int); the other fields are still unbound
   (define (read-fields fields option)
-    (syntax-case fields (:short :long :arity :type :choices :description :required)
+    (syntax-case fields (:short :long :arity :type :choices :description :required :count)
       [() option]
       [(:short value . rest)
        (begin
@@ -179,8 +181,12 @@
        (begin
          (option-ast-required-set-if-not-given-yet! option #t (duplicate fields))
          (read-fields #'rest option))]
+      [(:count . rest)
+       (begin
+         (option-ast-count-set-if-not-given-yet! option #t (duplicate fields))
+         (read-fields #'rest option))]
       [(bad . _)
-       (violation "unknown field, or field without a value (expected :short :long :arity :type :choices :description :required)"
+       (violation "unknown field, or field without a value (expected :short :long :arity :type :choices :description :required :count)"
                   #'bad)]
       [_ (violation "an option clause is a list of :key value pairs" fields)]))
 

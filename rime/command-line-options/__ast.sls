@@ -14,6 +14,9 @@
           option-ast-description
           option-ast-source
           option-ast-required
+          option-ast-count
+          make-counted-option-ast
+          option-ast-count-set-if-not-given-yet!
           option-ast-short-set-if-not-given-yet!
           option-ast-long-set-if-not-given-yet!
           option-ast-min-set-if-not-given-yet!
@@ -54,7 +57,12 @@
   ;;               is used as it is); what the field holds depends on the phase, see below
   ;; description string
   ;; source      opaque, where the option came from; only handed back to `report` below, #f at runtime
-  ;; required    boolean, #t when it is an error that the option is absent; never #t for a flag
+  ;; required    boolean, #t when it is an error that the option is absent; never #t for a flag,
+  ;;               unless the flag is counted (then it has to be given at least once)
+  ;; count      boolean, #t for a flag that is counted: the program gets how many times it was
+  ;;               given (-vvv is 3), 0 when absent; only a flag can be counted. It is not an
+  ;;               argument of make-option-ast, which makes an option that is not counted;
+  ;;               make-counted-option-ast makes one that is.
   ;;
   ;; The record is the same at compile time and at runtime: the generated code builds it again
   ;; (__codegen.sls) and the runtime works with it (__runtime.sls).
@@ -92,7 +100,18 @@
             (mutable converter)
             (mutable description)
             source
-            (mutable required)))
+            (mutable required)
+            (mutable count))
+    (protocol
+     (lambda (new)
+       (lambda (short long min max converter description source required)
+         (new short long min max converter description source required #f)))))
+
+  ;; an option that is a counted flag, see `count` above
+  (define (make-counted-option-ast short long min max converter description source required)
+    (let ([option (make-option-ast short long min max converter description source required)])
+      (option-ast-count-set! option #t)
+      option))
 
   ;; the value of a field that has not been set yet; not #f, which is a value
   (define unbound (list 'unbound))
@@ -152,7 +171,9 @@
 
   ;; an option that only has its source, everything else is still to be read
   (define (make-unbound-option-ast source)
-    (make-option-ast unbound unbound unbound unbound unbound unbound source unbound))
+    (let ([option (make-option-ast unbound unbound unbound unbound unbound unbound source unbound)])
+      (option-ast-count-set! option unbound)
+      option))
 
   ;; (option-ast-<field>-set-if-not-given-yet! option value on-duplicate)
   ;; Sets the field in place. If the field was already given, even as #f, it is left alone and
@@ -192,9 +213,15 @@
         (option-ast-required-set! option value)
         (on-duplicate)))
 
-  ;; the defaults: no names, exactly one argument, no converter, no description, not required;
-  ;; only the fields that are still unbound are set
+  (define (option-ast-count-set-if-not-given-yet! option value on-duplicate)
+    (if (unbound? (option-ast-count option))
+        (option-ast-count-set! option value)
+        (on-duplicate)))
+
+  ;; the defaults: no names, exactly one argument, no converter, no description, not required,
+  ;; not counted; only the fields that are still unbound are set
   (define (option-ast-fill-defaults! option)
+    (option-ast-count-set-if-not-given-yet! option #f ignore)
     (option-ast-short-set-if-not-given-yet! option #f ignore)
     (option-ast-long-set-if-not-given-yet! option #f ignore)
     (option-ast-min-set-if-not-given-yet! option 1 ignore)
@@ -228,8 +255,10 @@
       (problem "arity min must not exceed max"))
     (when (and (flag? option) (option-ast-converter option))
       (problem ":type and :choices must not be given when arity is 0"))
-    (when (and (flag? option) (option-ast-required option))
-      (problem "a flag (arity 0) cannot be :required")))
+    (when (and (flag? option) (option-ast-required option) (not (option-ast-count option)))
+      (problem "a flag (arity 0) cannot be :required"))
+    (when (and (option-ast-count option) (not (flag? option)))
+      (problem ":count is only for a flag (arity 0)")))
 
   ;; The names the program uses to read an option are the names without their dashes. They must be
   ;; unique across all options, and must not be the names of the built-in help.
