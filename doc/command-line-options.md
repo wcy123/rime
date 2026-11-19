@@ -60,7 +60,7 @@ as syntax violations.
 
 Option names are strings: `:short "-b"` (a single dash) and `:long "--long-name"` (two dashes).
 Names must not contain `=`, `,` or whitespace. `-h` and `--help` are reserved.
-There is no clustering, `-vq` is an unknown option, not `-v -q`.
+There is no clustering, `-vq` is an ordinary word, not `-v -q`.
 
 The program reads an option by its name without the dashes: `"b"` for `:short "-b"`, `"long-name"`
 for `:long "--long-name"`. These names must be different for all options, so `[:short "-x"]` and
@@ -134,7 +134,8 @@ so it takes the place of `:type`: giving both is a syntax error, and so is givin
 * A choice is a string or an exact integer, and there is at least one. The value you get is the choice
   itself: `"yaml"`, or the integer `4` (no `:type int` needed). Strings and integers can be mixed.
 * An argument has to match exactly, with the same case. An integer matches its usual text, so `4`
-  matches `"4"` but not `"04"`; a negative one has to be escaped, `--delta '\-1'`.
+  matches `"4"` but not `"04"`; a negative one is written as it is, `--delta -1` (see
+  [Words that start with `-`](#words-that-start-with--)).
 * Two choices with the same text are an error (`"1"` and `1`), since the second could never be chosen.
 * Every argument of an option with several arguments is checked, `-m a c`.
 * A wrong value raises `argument must be one of the choices` (see [Errors](#errors)).
@@ -277,7 +278,7 @@ prog --exclude=a file          ; with =, exactly one argument, "file" is a posit
 ```
 
 * An option with `(min max)` arguments takes the following words until it has `max` of them, or the
-  next word looks like an option, or the word is `--`. Fewer than `min` is an error.
+  next word is an option, or the word is `--`. Fewer than `min` is an error.
 * With `=`, the text after the first `=` is exactly one argument, whatever it contains: commas, spaces,
   another `=`, a leading `-`. This is the same rule as in getopt, argparse and click, for every arity.
   There is no comma list. The words that follow are not consumed, so `=` is the way to stop an option that
@@ -334,21 +335,48 @@ next word is an option or `--`. With arity `(1 +)`, `prog a -e x y b` gives `-e`
 and the positional word `"a"`; write `prog a -e x y -- b` to keep `b` positional.
 An option given twice keeps its last occurrence.
 
-## Arguments starting with `-`
+## Words that start with `-`
 
-A word starting with `-` is an option. To use it as a value, escape the dash with a backslash,
-`\-`. This is the text the program receives, so the backslash has to survive the shell.
-In a shell, write `'\-x'` or `\\-x`.
+A word is an option only when it is the name of an option that the program defines (`-n`, `--count`,
+`--count=3`), or `-h` and `--help`. Every other word is an ordinary word, whatever it starts with: a
+positional word, or the argument of the option before it. This covers negative numbers (`-5`,
+`-1.5`) and any other word that is not defined (`-z`, `--typo`).
 
 ```
-prog -s '\-x'                 ; -s gets "-x"
-prog -n '\-5'                 ; -n gets -5
-prog '\-file'                 ; positional "-file"
-prog --files=-a                ; "-a", after = a leading dash needs no escape
+$ prog -n -5 -x -1.5              ; a number is an ordinary word
+"count" => -5
+"ratio" => -1.5
+
+$ prog -z file                    ; -z is not defined: a positional word
+"file" => ("-z" "file")
+
+$ prog --verbos file              ; a typo is a positional word too
+"file" => ("--verbos" "file")
+
+$ prog -n -v                      ; -v is defined, so it is an option
+Exception in opt-parser: too few arguments for option with irritant "-n"
+
+$ prog -s -z                      ; an undefined word is the argument
+"name" => "-z"
+
+$ prog -- -v                      ; after -- everything is a word
+"file" => ("-v")
+
+$ prog -s=-v                      ; after = anything is the argument
+"name" => "-v"
+
+$ prog -s '\-v'                   ; the escape gives the word -v
+"name" => "-v"
 ```
 
-A lone `-` is a value, not an option, and so is any word after `--`.
-So, negative numbers must be written `\-5`: `-n -5` is `too few arguments for option`.
+* An option that has the name of a value cannot be given as that value: if the program defines
+  `[:short "-5"]`, `-5` is that option. Give the word after `--`, after `=` (`--name=-5`), or with the
+  escape `\-5`, which is the word `-5`. The backslash has to survive the shell: write `'\-5'` or `\\-5`.
+* A mistyped option is not an error, it is a word. With a `:positional` clause that takes any
+  number of words it becomes one of them (`--verbos file` above), and an option before it takes it as an
+  argument when it takes a variable number of them. A program that declares no positional word
+  rejects it, `unexpected positional argument`.
+* A lone `-` is a word, not an option, and so is any word after `--`.
 
 # Help
 
@@ -388,7 +416,6 @@ Catch it with `guard`; the library never exits by itself except for `-h`.
 
 | message                            | when                                                  | irritants              |
 |------------------------------------|-------------------------------------------------------|------------------------|
-| `unknown option`                   | an option-like word that is not defined               | the word               |
 | `too few arguments for option`     | fewer than `min` arguments, also `--name=x` for an option that needs two or more | the option name        |
 | `option does not take arguments`   | `--flag=1` on an arity 0 option                       | the option name        |
 | `invalid argument value`           | the conversion failed                                 | the option name, the text |
@@ -403,7 +430,8 @@ Catch it with `guard`; the library never exits by itself except for `-h`.
   (parse (cdr (command-line))))
 ```
 
-The accessor raises `unknown option` for names that were not defined (also a name with its dashes),
+The accessor raises `unknown option` for names that were not defined (also a name with its dashes);
+the parser never does, a word that is not a defined option is an ordinary word,
 and `invalid option key` for anything that is not a string or a symbol.
 
 # A complete example
@@ -487,8 +515,8 @@ Exception in opt-parser: invalid argument value with irritants ("-n" "abc")
 $ grep-lite -n
 Exception in opt-parser: too few arguments for option with irritant "-n"
 
-$ grep-lite --nope
-Exception in opt-parser: unknown option with irritant "--nope"
+$ grep-lite -n -v
+Exception in opt-parser: too few arguments for option with irritant "-n"
 
 $ grep-lite --window=1,2
 Exception in opt-parser: invalid argument value with irritants ("--window" "1,2")

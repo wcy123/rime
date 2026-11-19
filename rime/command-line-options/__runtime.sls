@@ -48,7 +48,7 @@
              (set! help-asked? #t)
              (on-help (format-usage specs (program-name) positionals))
              '()]
-            [(option-like? (car tokens))
+            [(option-like? (car tokens) specs)
              (scan (parse-option (car tokens) (cdr tokens)))]
             [else (cons (unescape (car tokens)) (scan (cdr tokens)))]))
 
@@ -59,7 +59,7 @@
          (define (parse-option token rest)
            (let* ([equals (index-of #\= token)]
                   [name (if equals (substring token 0 equals) token)]
-                  [spec (or (find-spec-by-token specs name) (fail "unknown option" token))])
+                  [spec (find-spec-by-token specs name)])
              (cond
               [equals
                (cond [(= 0 (option-ast-max spec))
@@ -83,7 +83,7 @@
                  (values (reverse taken) tokens))))
 
          (define (argument-token? token)
-           (not (or (string=? token "--") (option-like? token))))
+           (not (or (string=? token "--") (option-like? token specs))))
 
          (define (store! spec name items)
            (hashtable-set! table spec (convert-items spec name items)))
@@ -316,10 +316,15 @@
   ;; tokens
   ;; ========================================
 
-  (define (option-like? token)
-    (and (> (string-length token) 1)
-         (char=? (string-ref token 0) #\-)
-         (not (string=? token "--"))))
+  ;; A word is an option only when it is the name of a defined option, alone or followed by =text
+  ;; ("-n", "--count=3"), or -h and --help. Any other word is an ordinary word, whatever it starts
+  ;; with: -5, -x and --typo are positional words, or the arguments of the option before them.
+  ;; An option that is named like a value, say -5, cannot be given as that value; write it after --,
+  ;; after =, or with the escape.
+  (define (option-like? token specs)
+    (let ([equals (index-of #\= token)])
+      (or (and (member token '("-h" "--help")) #t)
+          (and (find-spec-by-token specs (if equals (substring token 0 equals) token)) #t))))
 
   ;; "\-x" is the way to pass "-x" as a value
   (define (unescape token)
