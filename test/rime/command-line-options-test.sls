@@ -1322,10 +1322,10 @@
     (CHECK equal? (convert-string "x y") "x y"))
 
   ;; ========================================
-  ;; :intermixed, options and positional words in any order
+  ;; options and positional words in any order
   ;; ========================================
 
-  (define-command-line-options parse-mixed :intermixed
+  (define-command-line-options parse-mixed
     [:short "-emit" :long "--emit" :description "action"]
     [:short "-opt" :long "--opt" :arity 0 :description "run the optimizer"]
     [:short "-x" :long "--x" :description "kind of input"]
@@ -1341,67 +1341,62 @@
     (let ([option (parse-mixed args)])
       (list (option "-emit") (option "-opt") (option "-x") (positionals option))))
 
-  (define-test test-intermixed-option-before-positional
+  (define-test test-mixed-option-before-positional
     (CHECK equal? (mixed '("--emit=ast" "example.toy")) '("ast" absent #f ("example.toy"))))
 
-  (define-test test-intermixed-option-after-positional
+  (define-test test-mixed-option-after-positional
     (CHECK equal? (mixed '("example.toy" "--emit=ast")) '("ast" absent #f ("example.toy"))))
 
-  (define-test test-intermixed-lone-dash-is-positional
+  (define-test test-mixed-lone-dash-is-positional
     (CHECK equal? (mixed '("-" "--emit=ast")) '("ast" absent #f ("-"))))
 
-  (define-test test-intermixed-option-argument-after-positional
+  (define-test test-mixed-option-argument-after-positional
     (CHECK equal? (mixed '("example.toy" "-emit" "ast")) '("ast" absent #f ("example.toy"))))
 
-  (define-test test-intermixed-flag-after-positional
+  (define-test test-mixed-flag-after-positional
     (CHECK equal? (mixed '("example.toy" "-emit=mlir" "-opt")) '("mlir" present #f ("example.toy"))))
 
-  (define-test test-intermixed-option-before-and-after-positional
+  (define-test test-mixed-option-before-and-after-positional
     (CHECK equal? (mixed '("-x" "mlir" "driver-input.txt" "-emit=mlir"))
            '("mlir" absent "mlir" ("driver-input.txt")))
     (CHECK equal? (mixed '("driver-input.txt" "-x" "mlir" "-emit=mlir"))
            '("mlir" absent "mlir" ("driver-input.txt"))))
 
-  (define-test test-intermixed-positional-only
+  (define-test test-mixed-positional-only
     (CHECK equal? (mixed '("example.toy")) '(#f absent #f ("example.toy"))))
 
-  (define-test test-intermixed-double-dash-ends-options
+  (define-test test-mixed-double-dash-ends-options
     (CHECK equal? (mixed '("example.toy" "--" "--emit=ast")) '(#f absent #f ("example.toy" "--emit=ast")))
     (CHECK equal? (mixed '("-opt" "--" "-x")) '(#f present #f ("-x")))
     (CHECK equal? (mixed '("a" "--" "b" "-opt")) '(#f absent #f ("a" "b" "-opt"))))
 
-  (define-test test-intermixed-positional-order-is-kept
+  (define-test test-mixed-positional-order-is-kept
     (let ([option (parse-mixed '("a" "-v" "b" "-v" "c"))])
       (CHECK eq? (option "-v") 'present)
       (CHECK equal? (positionals option) '("a" "b" "c"))
       (CHECK eqv? (option 'number-of-positional-argument) 3)))
 
-  (define-test test-intermixed-escaped-word-is-positional
+  (define-test test-mixed-escaped-word-is-positional
     (CHECK equal? (positionals (parse-mixed '("a" "\\-x" "b"))) '("a" "-x" "b")))
 
-  (define-test test-intermixed-option-with-unlimited-arity-takes-ordinary-words
+  (define-test test-mixed-option-with-unlimited-arity-takes-ordinary-words
     (let ([option (parse-mixed '("a" "-e" "x" "y" "b"))])
       (CHECK equal? (option "-e") '("x" "y" "b"))
       (CHECK equal? (positionals option) '("a"))))
 
-  (define-test test-intermixed-unlimited-arity-stops-at-an-option
+  (define-test test-mixed-unlimited-arity-stops-at-an-option
     (let ([option (parse-mixed '("-e" "x" "y" "-v" "b"))])
       (CHECK equal? (option "-e") '("x" "y"))
       (CHECK eq? (option "-v") 'present)
       (CHECK equal? (positionals option) '("b"))))
 
-  (define-test test-intermixed-last-occurrence-wins
+  (define-test test-mixed-last-occurrence-wins
     (CHECK equal? (mixed '("-emit=a" "f" "-emit=b")) '("b" absent #f ("f"))))
 
-  (define-test test-intermixed-unknown-option-after-positional
+  (define-test test-mixed-unknown-option-after-positional
     (CHECK equal? (error-message (lambda () (parse-mixed '("f" "--nope")))) "unknown option"))
 
-  (define-test test-intermixed-help-after-positional
+  (define-test test-mixed-help-after-positional
     (let ([text #f])
-      (parse-command-line usage-specs '("a" "--help") (lambda (t) (set! text t)) #t)
-      (CHECK eq? (and text #t) #t)))
-
-  (define-test test-default-mode-is-not-intermixed
-    (let ([option (parse '("in.txt" "-v"))])
-      (CHECK eq? (option "-v") 'absent)
-      (CHECK equal? (positionals option) '("in.txt" "-v")))))
+      (parse-command-line usage-specs '("a" "--help") (lambda (t) (set! text t)))
+      (CHECK eq? (and text #t) #t))))
