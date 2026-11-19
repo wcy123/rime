@@ -208,10 +208,17 @@
              [else (fail "unknown option" key (unknown-name-hint specs positionals name))]))
           (fail "invalid option key" key))))
 
-  ;; When the program asks for a name that does not exist, (option "verbos"), the error carries the
-  ;; name and then a hint about what to do. A name that starts with a dash was written like on the
-  ;; command line, so the hint says that the names have no dashes. Any other name gets the list of
-  ;; the names that do exist.
+  ;; (unknown-name-hint specs positionals name) => the hint that the error carries after the name
+  ;;   input   specs and positionals: what the parser defines; name: the name the program asked for
+  ;;   output  the text "names are read without the dashes" when the name starts with a dash,
+  ;;           otherwise the list of the names that do exist, the options in the order they were
+  ;;           defined (short name first), then the positionals
+  ;;
+  ;; For [:short "-v" :long "--verbose"], [:short "-o" :long "--output"] and [:positional "file"]:
+  ;;   (option "--verbose")  =>  error: unknown option "--verbose"
+  ;;                             hint:  "names are read without the dashes"
+  ;;   (option "verbos")     =>  error: unknown option "verbos"
+  ;;                             hint:  ("v" "verbose" "o" "output" "file")
   (define (unknown-name-hint specs positionals name)
     (if (and (> (string-length name) 0) (char=? (string-ref name 0) #\-))
         "names are read without the dashes"
