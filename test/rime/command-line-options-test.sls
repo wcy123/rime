@@ -444,8 +444,8 @@
     (let ([option (parse '())])
       (CHECK equal? (error-message (lambda () (option "z"))) "unknown option")
       (CHECK equal? (error-message (lambda () (option "nope"))) "unknown option")
-      (CHECK equal? (error-message (lambda () (option 'count))) "unknown option")
-      (CHECK equal? (error-message (lambda () (option "count"))) "unknown option")
+      (CHECK equal? (error-message (lambda () (option "-n"))) "unknown option")
+      (CHECK equal? (error-message (lambda () (option "--count"))) "unknown option")
       (CHECK equal? (error-message (lambda () (option "h"))) "unknown option")))
 
   (define-test test-accessor-invalid-key
@@ -500,8 +500,8 @@
           [b (parse '("-n" "2" "x"))])
       (CHECK eqv? (a "n") 1)
       (CHECK eqv? (b "n") 2)
-      (CHECK eqv? (a 'number-of-positional-argument) 0)
-      (CHECK eqv? (b 'number-of-positional-argument) 1)))
+      (CHECK eqv? (positional-count a) 0)
+      (CHECK eqv? (positional-count b) 1)))
 
   (define-command-line-options other
     [:short "-n" :long "--number" :arity 1 :type string :description "string number"])
@@ -544,8 +544,8 @@
     (CHECK eq? ((flag '()) "g") 'absent))
 
   (define-test test-no-options-defined
-    (let ([option (none '("a" "b"))])
-      (CHECK eqv? (positional-count option) 2)))
+    (CHECK eq? (procedure? (none '())) #t)
+    (CHECK equal? (error-message (lambda () (none '("a" "b")))) "unexpected positional argument"))
 
   ;; ========================================
   ;; definition errors, detected at expansion time
@@ -1085,7 +1085,7 @@
            [option (parse-command-line usage-specs '("-h")
                                        (lambda (text) (set! shown text)))])
       (CHECK equal? shown (format-usage usage-specs (program-name)))
-      (CHECK eqv? (positional-count option) 0)))
+      (CHECK eq? (option "v") 'absent)))
 
   (define-test test-help-long-calls-handler
     (let ([shown #f])
@@ -1096,9 +1096,10 @@
   (define-test test-help-after-double-dash-is-positional
     (let* ([shown #f]
            [option (parse-command-line usage-specs '("--" "-h")
-                                       (lambda (text) (set! shown text)))])
+                                       (lambda (text) (set! shown text))
+                                       (make-positional-ast "args" 0 unlimited #f "" #f))])
       (CHECK eq? shown #f)
-      (CHECK equal? (positional option 0) "-h")))
+      (CHECK equal? (option "args") '("-h"))))
 
   (define-test test-help-after-positional-shows-the-usage
     (let ([shown #f])
@@ -1188,9 +1189,11 @@
       (let ([result (run-capturing-exit (lambda () (helpful '("-h" "--nope"))))])
         (CHECK eqv? (car result) 0))))
 
+  (define-command-line-options takes-words [:positional "words" :arity (0 +)])
+
   (define-test test-help-after-double-dash-does-not-exit
     (when run-capturing-exit
-      (let ([result (run-capturing-exit (lambda () (helpful '("--" "-h"))))])
+      (let ([result (run-capturing-exit (lambda () (takes-words '("--" "-h"))))])
         (CHECK eq? (car result) 'exit-not-called)
         (CHECK equal? (cdr result) ""))))
 
@@ -1375,7 +1378,7 @@
     (let ([option (parse-mixed '("a" "-v" "b" "-v" "c"))])
       (CHECK eq? (option "v") 'present)
       (CHECK equal? (positionals option) '("a" "b" "c"))
-      (CHECK eqv? (positional-count option) 3)))
+      (CHECK eqv? (length (positionals option)) 3)))
 
   (define-test test-mixed-escaped-word-is-positional
     (CHECK equal? (positionals (parse-mixed '("a" "\\-x" "b"))) '("a" "-x" "b")))
@@ -1426,7 +1429,8 @@
 
   (define-command-line-options parse-required
     [:short "-i" :long "--input" :required :description "input file"]
-    [:short "-v" :arity 0 :description "verbose"])
+    [:short "-v" :arity 0 :description "verbose"]
+    [:positional "rest" :arity (0 +)])
 
   (define-command-line-options parse-required-short
     [:short "-k" :required])
@@ -1441,7 +1445,7 @@
   (define-test test-required-given-after-a-positional-word-in-the-equals-form
     (let ([option (parse-required '("f" "--input=a"))])
       (CHECK equal? (option "input") "a")
-      (CHECK equal? (positional option 0) "f")))
+      (CHECK equal? (option "rest") '("f"))))
 
   (define-test test-required-missing
     (CHECK equal? (error-message (lambda () (parse-required '()))) "missing required option")
@@ -1713,4 +1717,109 @@
                 '(let ()
                    (define-command-line-options p [:positional 42])
                    p))
-           #t)))
+           #t))
+  ;; ========================================
+  ;; more positional cases
+  ;; ========================================
+
+  (define-command-line-options parse-input
+    [:long "--input" :required :description "input"]
+    [:positional "file"])
+
+  (define-test test-required-option-is-checked-before-the-positional
+    (CHECK equal? (error-message (lambda () (parse-input '()))) "missing required option")
+    (CHECK equal? (error-message (lambda () (parse-input '("--input" "a")))) "too few positional arguments")
+    (CHECK equal? ((parse-input '("f" "--input" "a")) "file") "f"))
+
+  (define-test test-help-needs-neither-the-required-option-nor-the-positional
+    (let ([shown #f])
+      (parse-command-line (list (make-option-ast #f "--input" 1 1 #f "" #f #t))
+                          '("-h")
+                          (lambda (text) (set! shown text))
+                          (make-positional-ast "file" 1 1 #f "" #f))
+      (CHECK eq? (and shown #t) #t)))
+
+  (define-command-line-options parse-upper
+    [:positional "word" :arity (1 +) :type (lambda (s) (string-upcase s))])
+
+  (define-test test-positional-with-a-custom-type
+    (CHECK equal? ((parse-upper '("a" "b")) "word") '("A" "B")))
+
+  (define-command-line-options parse-list-and-file
+    [:short "-e" :arity (1 +) :description "words"]
+    [:positional "file"])
+
+  (define-test test-an-unlimited-option-takes-the-words-after-it
+    (let ([option (parse-list-and-file '("f" "-e" "a" "b"))])
+      (CHECK equal? (option "e") '("a" "b"))
+      (CHECK equal? (option "file") "f"))
+    (CHECK equal? (error-message (lambda () (parse-list-and-file '("-e" "a" "b"))))
+           "too few positional arguments"))
+
+  (define-test test-double-dash-ends-an-unlimited-option-before-the-positional
+    (let ([option (parse-list-and-file '("-e" "a" "--" "f"))])
+      (CHECK equal? (option "e") '("a"))
+      (CHECK equal? (option "file") "f")))
+
+  (define-test test-positional-and-the-equals-form-of-an-option
+    (let ([option (parse-mode '("fast" "-v"))])
+      (CHECK equal? (option "mode") "fast"))
+    (let ([option (parse-command-line
+                   (list (make-option-ast "-n" "--count" 1 1 (builtin-converter 'int) "" #f #f))
+                   '("f" "--count=3")
+                   default-on-help
+                   (make-positional-ast "file" 1 1 #f "" #f))])
+      (CHECK eqv? (option "count") 3)
+      (CHECK equal? (option "file") "f")))
+
+  (define-test test-positional-name-is-unknown-without-a-clause
+    (CHECK equal? (error-message (lambda () ((parse-none '()) "file"))) "unknown option"))
+
+  (define-test test-lookup-names-are-case-sensitive
+    (CHECK equal? (error-message (lambda () ((parse-names '()) "V"))) "unknown option")
+    (CHECK equal? (error-message (lambda () ((parse-names '()) "Emit"))) "unknown option"))
+
+  (define-test test-lookup-by-short-and-long-name-of-the-same-option
+    (let ([option (parse-names '("--emit" "mlir"))])
+      (CHECK equal? (option "emit") "mlir")
+      (CHECK equal? (option 'emit) "mlir")))
+
+  (define-test test-positional-too-few-and-too-many-through-the-runtime
+    (let ([parse-with (lambda (min max words)
+                        (parse-command-line '() words default-on-help
+                                            (make-positional-ast "w" min max #f "" #f)))])
+      (CHECK equal? (error-message (lambda () (parse-with 2 3 '("a")))) "too few positional arguments")
+      (CHECK equal? (error-irritants (lambda () (parse-with 2 3 '("a")))) '("w"))
+      (CHECK equal? ((parse-with 2 3 '("a" "b")) "w") '("a" "b"))
+      (CHECK equal? ((parse-with 2 3 '("a" "b" "c")) "w") '("a" "b" "c"))
+      (CHECK equal? (error-irritants (lambda () (parse-with 2 3 '("a" "b" "c" "d" "e"))))
+             '("d" "e"))))
+
+  ;; ========================================
+  ;; the usage of a positional
+  ;; ========================================
+
+  (define-test test-usage-of-a-positional-without-a-description
+    (CHECK equal? (format-usage '() "p" (make-positional-ast "file" 1 1 #f "" #f))
+           (string-append "Usage: p [options] [--] <file>\n"
+                          "\n"
+                          "Arguments:\n"
+                          "  <file>\n"
+                          "\n"
+                          "Options:\n"
+                          "  -h, --help  show this help message and exit\n")))
+
+  (define-test test-usage-of-a-positional-with-a-multi-line-description
+    (CHECK equal? (format-usage '() "p" (make-positional-ast "f" 0 unlimited #f "first\nsecond" #f))
+           (string-append "Usage: p [options] [--] [<f>...]\n"
+                          "\n"
+                          "Arguments:\n"
+                          "  [<f>...]  first\n"
+                          "            second\n"
+                          "\n"
+                          "Options:\n"
+                          "  -h, --help  show this help message and exit\n")))
+
+  (define-test test-usage-without-a-positional-has-no-arguments-section
+    (CHECK eq? (contains? (format-usage '() "p") "Arguments:") #f)
+    (CHECK eq? (contains? (format-usage '() "p") "[--]") #f)))

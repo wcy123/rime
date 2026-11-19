@@ -21,11 +21,29 @@
           option-ast-converter-set-if-not-given-yet!
           option-ast-description-set-if-not-given-yet!
           option-ast-required-set-if-not-given-yet!
+          option-ast?
+          option-lookup-names
+          make-positional-ast
+          make-unbound-positional-ast
+          positional-ast?
+          positional-ast-name
+          positional-ast-min
+          positional-ast-max
+          positional-ast-converter
+          positional-ast-description
+          positional-ast-source
+          positional-ast-name-set-if-not-given-yet!
+          positional-ast-min-set-if-not-given-yet!
+          positional-ast-max-set-if-not-given-yet!
+          positional-ast-converter-set-if-not-given-yet!
+          positional-ast-description-set-if-not-given-yet!
+          positional-ast-fill-defaults!
           unlimited
           unbound
           unbound?
           option-ast-fill-defaults!
-          check-options)
+          check-options
+          check-positionals)
   (import (rnrs (6)))
 
   ;; short       string "-n", or #f
@@ -60,6 +78,56 @@
 
   (define (unbound? value)
     (eq? value unbound))
+
+  ;; The :positional clause: the words of the command line that are not options.
+  ;; name         string, what the program reads them by, and what the usage shows: <name>
+  ;; min, max     how many words, as for an option; `unlimited` when there is no limit
+  ;; converter    as for an option
+  ;; description  string
+  ;; source       as for an option
+  ;; While the clause is being read the fields it has not given yet are `unbound`, as for an option.
+  (define-record-type positional-ast
+    (fields (mutable name)
+            (mutable min)
+            (mutable max)
+            (mutable converter)
+            (mutable description)
+            source))
+
+  (define (make-unbound-positional-ast source)
+    (make-positional-ast unbound unbound unbound unbound unbound source))
+
+  (define (positional-ast-name-set-if-not-given-yet! positional value on-duplicate)
+    (if (unbound? (positional-ast-name positional))
+        (positional-ast-name-set! positional value)
+        (on-duplicate)))
+
+  (define (positional-ast-min-set-if-not-given-yet! positional value on-duplicate)
+    (if (unbound? (positional-ast-min positional))
+        (positional-ast-min-set! positional value)
+        (on-duplicate)))
+
+  (define (positional-ast-max-set-if-not-given-yet! positional value on-duplicate)
+    (if (unbound? (positional-ast-max positional))
+        (positional-ast-max-set! positional value)
+        (on-duplicate)))
+
+  (define (positional-ast-converter-set-if-not-given-yet! positional value on-duplicate)
+    (if (unbound? (positional-ast-converter positional))
+        (positional-ast-converter-set! positional value)
+        (on-duplicate)))
+
+  (define (positional-ast-description-set-if-not-given-yet! positional value on-duplicate)
+    (if (unbound? (positional-ast-description positional))
+        (positional-ast-description-set! positional value)
+        (on-duplicate)))
+
+  ;; the defaults: exactly one word, no converter, no description; the name is always given
+  (define (positional-ast-fill-defaults! positional)
+    (positional-ast-min-set-if-not-given-yet! positional 1 ignore)
+    (positional-ast-max-set-if-not-given-yet! positional 1 ignore)
+    (positional-ast-converter-set-if-not-given-yet! positional #f ignore)
+    (positional-ast-description-set-if-not-given-yet! positional "" ignore))
 
   ;; an option that only has its source, everything else is still to be read
   (define (make-unbound-option-ast source)
@@ -116,46 +184,90 @@
 
   (define (ignore) #f)
 
-  (define reserved-names '("-h" "--help"))
+  (define reserved-names '("h" "help"))
 
   ;; the max of an option that takes any number of arguments
   (define unlimited (greatest-fixnum))
 
-  ;; (report message option) is called for each broken rule and is expected not to return
+  ;; (report message source) is called for each broken rule and is expected not to return
   (define (check-options options report)
     (for-each (lambda (option) (check-option option report)) options)
     (check-names options report))
 
   ;; the rules for one option on its own
   (define (check-option option report)
+    (define (problem message) (report message (option-ast-source option)))
     (unless (or (option-ast-short option) (option-ast-long option))
-      (report "an option needs a :short or a :long name" option))
+      (problem "an option needs a :short or a :long name"))
     (when (and (option-ast-short option) (not (short-name? (option-ast-short option))))
-      (report ":short name must look like \"-x\"" option))
+      (problem ":short name must look like \"-x\""))
     (when (and (option-ast-long option) (not (long-name? (option-ast-long option))))
-      (report ":long name must look like \"--name\"" option))
+      (problem ":long name must look like \"--name\""))
     (when (> (option-ast-min option) (option-ast-max option))
-      (report "arity min must not exceed max" option))
+      (problem "arity min must not exceed max"))
     (when (and (flag? option) (option-ast-converter option))
-      (report ":type and :choices must not be given when arity is 0" option))
+      (problem ":type and :choices must not be given when arity is 0"))
     (when (and (flag? option) (option-ast-required option))
-      (report "a flag (arity 0) cannot be :required" option)))
+      (problem "a flag (arity 0) cannot be :required")))
 
-  ;; names must be unique across all options and must not use the built-in help names
+  ;; The names the program uses to read an option are the names without their dashes. They must be
+  ;; unique across all options, and must not be the names of the built-in help.
   (define (check-names options report)
     (let loop ([options options] [seen reserved-names])
       (unless (null? options)
         (let* ([option (car options)]
-               [names (filter values (list (option-ast-short option) (option-ast-long option)))])
+               [names (option-lookup-names option)])
           (for-each
            (lambda (name)
              (when (member name seen)
                (report (if (member name reserved-names)
-                           "-h and --help are reserved for the built-in help"
+                           reserved-message
                            "option name is defined twice")
-                       option)))
+                       (option-ast-source option))))
            names)
           (loop (cdr options) (append names seen))))))
+
+  (define reserved-message "-h and --help are reserved for the built-in help")
+
+  ;; the names to read the option by: the short name without its dash, the long name without its
+  ;; two dashes, each only once
+  ;;   (option-lookup-names -n --count)    => ("n" "count")
+  ;;   (option-lookup-names -emit --emit)  => ("emit")
+  (define (option-lookup-names option)
+    (let ([short (and (option-ast-short option) (drop-dashes (option-ast-short option) 1))]
+          [long (and (option-ast-long option) (drop-dashes (option-ast-long option) 2))])
+      (cond [(and short long) (if (string=? short long) (list short) (list short long))]
+            [short (list short)]
+            [long (list long)]
+            [else '()])))
+
+  (define (drop-dashes name count)
+    (let loop ([i 0])
+      (if (and (< i count) (< i (string-length name)) (char=? (string-ref name i) #\-))
+          (loop (+ i 1))
+          (substring name i (string-length name)))))
+
+  ;; the rules for the :positional clauses (there may be none, and there may be one) and for how
+  ;; their names relate to the options
+  (define (check-positionals positionals options report)
+    (for-each (lambda (positional) (check-positional positional options report)) positionals)
+    (when (and (pair? positionals) (pair? (cdr positionals)))
+      (report "only one :positional clause is allowed" (positional-ast-source (cadr positionals)))))
+
+  (define (check-positional positional options report)
+    (define (problem message) (report message (positional-ast-source positional)))
+    (let ([name (positional-ast-name positional)])
+      (when (and (> (string-length name) 0) (char=? (string-ref name 0) #\-))
+        (problem "a positional name must not start with -"))
+      (when (or (string=? name "") (not (well-formed? name)))
+        (problem "a positional name must not be empty or contain =, , or whitespace"))
+      (cond [(member name reserved-names) (problem reserved-message)]
+            [(exists (lambda (option) (member name (option-lookup-names option))) options)
+             (problem "positional name clashes with an option name")]))
+    (when (> (positional-ast-min positional) (positional-ast-max positional))
+      (problem "arity min must not exceed max"))
+    (when (eqv? 0 (positional-ast-max positional))
+      (problem "a positional argument must take at least one word, arity 0 is not allowed")))
 
   (define (short-name? name)
     (and (> (string-length name) 1)

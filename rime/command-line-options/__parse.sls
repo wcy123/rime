@@ -13,10 +13,12 @@
           (only (rime command-line-options __runtime)
                 builtin-converters builtin-converter make-choice-converter procedure->converter))
 
-  ;; (parse-options clauses) => list of option-ast
+  ;; (parse-options clauses) => (values options positional)
   ;;   input   clauses: the syntax of `clause ...` in (define-command-line-options parser clause ...),
   ;;           exactly as the user wrote them
-  ;;   output  one option-ast per clause, in the same order, already checked (fields: see __ast.sls)
+  ;;   output  options: one option-ast per option clause, in the same order, already checked
+  ;;           (fields: see __ast.sls)
+  ;;           positional: the positional-ast of the :positional clause, #f when there is none
   ;;   errors  a syntax violation, at the clause or at the offending part of it
   ;;
   ;;   (parse-options #'([:short "-v" :arity 0 :description "verbose"]
@@ -35,13 +37,16 @@
   ;;   (parse-options #'([:colour red]))               => violation: unknown field, ... (at :colour)
   ;;   (parse-options #'([]))                          => violation: an option needs a :short or a :long name
   (define (parse-options clauses)
-    (let ([options (read-clauses clauses)])
-      (check-options options
-                     (lambda (message option)
-                       (violation message (option-ast-source option))))
-      options))
+    (let* ([asts (read-clauses clauses)]
+           [options (filter option-ast? asts)]
+           [positionals (filter positional-ast? asts)]
+           [report (lambda (message source) (violation message source))])
+      (check-options options report)
+      (check-positionals positionals options report)
+      (values options (if (null? positionals) #f (car positionals)))))
 
-  ;; the clauses, one after the other -> list of option-ast in the same order, not yet checked
+  ;; the clauses, one after the other -> list of option-ast and positional-ast in the same order,
+  ;; not yet checked
   ;;   (read-clauses #'(c1 c2 c3)) = (list (read-clause #'c1) (read-clause #'c2) (read-clause #'c3))
   (define (read-clauses clauses)
     (syntax-case clauses ()
@@ -63,9 +68,68 @@
   ;;   [:short 42]        => violation: :short name must be a string or a symbol
   ;; Whether the option has a name at all is a semantic rule, checked later (__ast.sls).
   (define (read-clause clause)
-    (let ([option (read-fields clause (make-unbound-option-ast clause))])
-      (option-ast-fill-defaults! option)
-      option))
+    (if (positional-clause? clause)
+        (read-positional-clause clause)
+        (let ([option (read-fields clause (make-unbound-option-ast clause))])
+          (option-ast-fill-defaults! option)
+          option)))
+
+  ;; a clause is a :positional clause when the keyword is in it, in any place
+  (define (positional-clause? clause)
+    (syntax-case clause (:positional)
+      [() #f]
+      [(:positional . _) #t]
+      [(_ . rest) (positional-clause? #'rest)]
+      [_ #f]))
+
+  ;; (read-positional-clause clause) => positional-ast
+  ;;   clause = [:positional "file" :arity (1 +) :type int :description "input files"]
+  ;;   => name "file", min 1, max unlimited, converter (builtin-converter 'int), description "input files"
+  ;;   The fields are those of an option without the names: :arity :type :choices :description.
+  ;;   :short, :long and :required are for options and are a violation here.
+  (define (read-positional-clause clause)
+    (let ([positional (read-positional-fields clause (make-unbound-positional-ast clause))])
+      (positional-ast-fill-defaults! positional)
+      positional))
+
+  (define (read-positional-fields fields positional)
+    (syntax-case fields (:positional :arity :type :choices :description :short :long :required)
+      [() positional]
+      [(:positional value . rest)
+       (begin
+         (positional-ast-name-set-if-not-given-yet!
+          positional (name->string #'value ":positional name") (duplicate #'value))
+         (read-positional-fields #'rest positional))]
+      [(:arity value . rest)
+       (let-values ([(min max) (read-arity #'value)])
+         (positional-ast-min-set-if-not-given-yet! positional min (duplicate #'value))
+         (positional-ast-max-set-if-not-given-yet! positional max (duplicate #'value))
+         (read-positional-fields #'rest positional))]
+      [(:type value . rest)
+       (begin
+         (positional-ast-converter-set-if-not-given-yet!
+          positional (read-converter #'value) (converter-given-twice #'value))
+         (read-positional-fields #'rest positional))]
+      [(:choices value . rest)
+       (begin
+         (positional-ast-converter-set-if-not-given-yet!
+          positional (read-choices #'value) (converter-given-twice #'value))
+         (read-positional-fields #'rest positional))]
+      [(:description value . rest)
+       (begin
+         (positional-ast-description-set-if-not-given-yet!
+          positional (read-description #'value) (duplicate #'value))
+         (read-positional-fields #'rest positional))]
+      [(:short . _)
+       (violation ":short is a field of an option, not of a :positional clause" fields)]
+      [(:long . _)
+       (violation ":long is a field of an option, not of a :positional clause" fields)]
+      [(:required . _)
+       (violation ":required is a field of an option, not of a :positional clause" fields)]
+      [(bad . _)
+       (violation "unknown field, or field without a value (expected :positional :arity :type :choices :description)"
+                  #'bad)]
+      [_ (violation "a clause is a list of :key value pairs" fields)]))
 
   ;; (read-fields fields option) sets the fields that the clause gives, in place
   ;;   input   fields: the syntax of the :key value pairs of one clause, in any order
