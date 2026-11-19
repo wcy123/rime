@@ -604,6 +604,85 @@
       (assert #f)))
 
   ;; ========================================
+  ;; the command-line error type, and the usage in the error
+  ;; ========================================
+
+  ;; the condition that the thunk raises, #f when it raises nothing
+  (define (raised thunk)
+    (guard (e [#t e])
+      (thunk)
+      #f))
+
+  (define-test test-a-bad-command-line-raises-a-command-line-error
+    (let ([e (raised (lambda () (parse '("-n" "abc"))))])
+      (CHECK eq? (command-line-error? e) #t)
+      ;; everything that an error from the library had before is still there
+      (CHECK eq? (error? e) #t)
+      (CHECK eq? (who-condition? e) #t)
+      (CHECK eq? (condition-who e) 'opt-parser)
+      (CHECK equal? (condition-message e) "invalid argument value")
+      (CHECK equal? (condition-irritants e) '("-n" "abc"))))
+
+  (define-test test-every-kind-of-command-line-error-carries-the-usage
+    (let ([usage ((parse '()) "help")])
+      (for-each
+       (lambda (arguments)
+         (let ([e (raised (lambda () (parse arguments)))])
+           (CHECK eq? (and (command-line-error? e) #t) #t)
+           (CHECK equal? (list arguments (and e (command-line-error-usage e)))
+                  (list arguments usage))))
+       '(("-n" "abc")           ; invalid argument value
+         ("--nope")             ; unknown option
+         ("-n")                 ; too few arguments for option
+         ("--count=1,2")        ; too many arguments for option
+         ("--verbose=1")))))    ; option does not take arguments
+
+  (define-test test-missing-required-option-carries-the-usage
+    (let ([e (raised (lambda () (parse-required '())))])
+      (CHECK eq? (command-line-error? e) #t)
+      (CHECK equal? (condition-message e) "missing required option")
+      (CHECK equal? (command-line-error-usage e) ((parse-required '("-i" "a")) "help"))))
+
+  (define-test test-positional-errors-carry-the-usage
+    (let ([few (raised (lambda () (parse-one '())))]
+          [many (raised (lambda () (parse-one '("a" "b"))))]
+          [none (raised (lambda () (parse-none '("a"))))])
+      (CHECK equal? (condition-message few) "too few positional arguments")
+      (CHECK equal? (command-line-error-usage few) ((parse-one '("a")) "help"))
+      (CHECK equal? (condition-message many) "too many positional arguments")
+      (CHECK equal? (command-line-error-usage many) ((parse-one '("a")) "help"))
+      (CHECK equal? (condition-message none) "unexpected positional argument")
+      (CHECK equal? (command-line-error-usage none) ((parse-none '()) "help"))))
+
+  (define-test test-a-failing-custom-type-is-a-command-line-error-with-the-usage
+    (let ([e (raised (lambda () (strict '("-k" "no"))))])
+      (CHECK eq? (command-line-error? e) #t)
+      (CHECK equal? (condition-message e) "invalid argument value")
+      (CHECK equal? (command-line-error-usage e) ((strict '("-k" "ok")) "help"))))
+
+  (define-test test-errors-that-are-not-about-the-command-line-are-not-command-line-errors
+    (let ([option (parse '())])
+      ;; the program's own mistakes: a name that does not exist, a key that is not a name
+      (CHECK eq? (command-line-error? (raised (lambda () (option "nope")))) #f)
+      (CHECK eq? (command-line-error? (raised (lambda () (option 0)))) #f)
+      (CHECK equal? (condition-message (raised (lambda () (option "nope")))) "unknown option")
+      (CHECK equal? (condition-message (raised (lambda () (option 0)))) "invalid option key")
+      ;; and any other error of the program
+      (CHECK eq? (command-line-error? (raised (lambda () (parse '()) (error 'mine "a bug")))) #f)
+      (CHECK eq? (command-line-error? #f) #f)
+      (CHECK eq? (command-line-error? 'oops) #f)))
+
+  (define-test test-the-report-is-the-message-the-irritants-and-the-usage
+    (let ([e (raised (lambda () (parse '("-n" "abc"))))])
+      (CHECK equal? (format-command-line-error e)
+             (string-append (program-name) ": invalid argument value: \"-n\" \"abc\"\n\n"
+                            ((parse '()) "help"))))
+    (let ([e (raised (lambda () (parse-required '())))])
+      (CHECK equal? (format-command-line-error e)
+             (string-append (program-name) ": missing required option: \"--input\"\n\n"
+                            ((parse-required '("-i" "a")) "help")))))
+
+  ;; ========================================
   ;; accessor errors
   ;; ========================================
 
@@ -1302,6 +1381,35 @@
       (CHECK eq? shown #f)
       (CHECK equal? (option "u") "-H")))
 
+  ;; ========================================
+  ;; the help hook of the defined parser
+  ;; ========================================
+
+  (define-test test-the-parser-calls-the-help-hook-instead-of-exiting
+    (let* ([shown '()]
+           [option (parse '("-v" "-h" "-n" "5") (lambda (text) (set! shown (cons text shown))))])
+      ;; called once, with the usage text, and the parse goes on to return an accessor
+      (CHECK equal? shown (list ((parse '()) "help")))
+      (CHECK eq? (procedure? option) #t)
+      ;; what came before -h was read, what came after was not
+      (CHECK eq? (and (not (memq (option "v") '(#f absent))) #t) #t)
+      (CHECK equal? (option "n") #f)))
+
+  (define-test test-the-help-hook-is-not-called-when-help-is-not-asked
+    (let ([calls 0])
+      (parse '("-v" "-n" "5") (lambda (text) (set! calls (+ calls 1))))
+      (CHECK eqv? calls 0)))
+
+  (define-test test-the-help-hook-skips-the-required-checks
+    (let ([shown #f])
+      (parse-required '("--help") (lambda (text) (set! shown text)))
+      (CHECK eq? (and shown #t) #t)
+      (parse-one '("-h") (lambda (text) (set! shown 'again)))
+      (CHECK eq? shown 'again)))
+
+  (define-test test-the-parser-still-takes-the-arguments-alone
+    (CHECK equal? ((parse '("-n" "7")) "n") 7))
+
   ;; The real -h path of a macro-defined parser prints usage and calls (exit 0).
   ;; exit and the output port are intercepted through eval in an implementation specific
   ;; environment (cf. rime/rime-0/__feature-registry.sls); the test is skipped elsewhere.
@@ -1384,6 +1492,75 @@
       (let ([result (run-capturing-exit (lambda () (takes-words '("--" "-h"))))])
         (CHECK eq? (car result) 'exit-not-called)
         (CHECK equal? (cdr result) ""))))
+
+  ;; (run-capturing-exit-and-error thunk) => (exit-code output error-output), or #f when unsupported
+  (define run-capturing-exit-and-error
+    (cond
+     [chez-environment
+      (eval '(lambda (thunk)
+               (let* ([exit-code 'exit-not-called]
+                      [error-text ""]
+                      [output
+                       (call-with-string-output-port
+                        (lambda (out)
+                          (set! error-text
+                                (call-with-string-output-port
+                                 (lambda (err)
+                                   (parameterize ([current-output-port out] [current-error-port err])
+                                     (call/cc
+                                      (lambda (return)
+                                        (parameterize ([exit-handler
+                                                        (lambda codes
+                                                          (set! exit-code (if (null? codes) 0 (car codes)))
+                                                          (return #f))])
+                                          (thunk))))))))))])
+                 (list exit-code output error-text)))
+            chez-environment)]
+     [guile-environment
+      (eval '(lambda (thunk)
+               (let* ([exit-code 'exit-not-called]
+                      [error-text ""]
+                      [output
+                       (with-output-to-string
+                         (lambda ()
+                           (set! error-text
+                                 (with-error-to-string
+                                  (lambda ()
+                                    (catch 'quit
+                                      thunk
+                                      (lambda (key . codes)
+                                        (set! exit-code (if (null? codes) 0 (car codes))))))))))])
+                 (list exit-code output error-text)))
+            guile-environment)]
+     [else #f]))
+
+  (define-test test-parse-or-exit-returns-the-accessor-when-the-command-line-is-fine
+    (CHECK equal? ((parse-or-exit parse '("-n" "7")) "n") 7))
+
+  (define-test test-parse-or-exit-exits-with-2-and-reports-on-the-error-port
+    (when run-capturing-exit-and-error
+      (let ([result (run-capturing-exit-and-error (lambda () (parse-or-exit parse '("-n" "abc"))))])
+        (CHECK eqv? (car result) 2)
+        (CHECK equal? (cadr result) "")
+        (CHECK equal? (caddr result)
+               (string-append (program-name) ": invalid argument value: \"-n\" \"abc\"\n\n"
+                              ((parse '()) "help"))))
+      (let ([result (run-capturing-exit-and-error (lambda () (parse-or-exit parse-one '())))])
+        (CHECK eqv? (car result) 2)
+        (CHECK eq? (contains? (caddr result) "too few positional arguments: \"file\"") #t)
+        (CHECK eq? (contains? (caddr result) "Usage: ") #t))))
+
+  (define-test test-parse-or-exit-lets-the-other-errors-through
+    (let ([e (raised (lambda () (parse-or-exit (lambda (arguments) (error 'mine "a bug")) '())))])
+      (CHECK equal? (condition-message e) "a bug")
+      (CHECK eq? (command-line-error? e) #f)))
+
+  (define-test test-parse-or-exit-keeps-the-help-exit-of-the-parser
+    (when run-capturing-exit-and-error
+      (let ([result (run-capturing-exit-and-error (lambda () (parse-or-exit helpful '("-h"))))])
+        (CHECK eqv? (car result) 0)
+        (CHECK equal? (cadr result) helpful-usage)
+        (CHECK equal? (caddr result) ""))))
 
   (define-test test-help-is-not-a-user-option
     (CHECK eq? (syntax-error?
