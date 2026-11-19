@@ -15,20 +15,33 @@
 
   ;; the generated definition, as a datum
   (define (generate parser . options)
-    (syntax->datum (generate-definition parser options)))
+    (syntax->datum (generate-definition parser options #f)))
 
   ;; what the definition looks like around the list of specs
   (define (definition parser . specs)
+    (definition-with-positional parser #f specs))
+
+  (define (definition-with-positional parser positional specs)
     `(define ,parser
        (let ([specs (list ,@specs)])
          (lambda (arguments)
-           (parse-command-line specs arguments)))))
+           (parse-command-line specs arguments default-on-help ,positional)))))
 
   (define-test test-required-is-emitted
     (CHECK equal?
            (syntax->datum
-            (generate-definition #'p (list (make-option-ast "-a" #f 1 1 #f "" #f #t))))
+            (generate-definition #'p (list (make-option-ast "-a" #f 1 1 #f "" #f #t)) #f))
            (definition 'p '(make-option-ast "-a" #f 1 1 #f "" #f #t))))
+
+  (define-test test-positional-is-emitted
+    (CHECK equal?
+           (syntax->datum
+            (generate-definition #'p (list (make-option-ast "-a" #f 1 1 #f "" #f #f))
+                                 (make-positional-ast "file" 1 unlimited #'(builtin-converter 'int) "files" #f)))
+           (definition-with-positional
+             'p
+             `(make-positional-ast "file" 1 ,unlimited (builtin-converter 'int) "files" #f)
+             '((make-option-ast "-a" #f 1 1 #f "" #f #f)))))
 
   (define-test test-no-options
     (CHECK equal? (generate #'parser) (definition 'parser)))
