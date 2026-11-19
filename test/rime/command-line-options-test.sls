@@ -341,6 +341,211 @@
              "unknown option")))
 
   ;; ========================================
+  ;; short option forms: -j4, -vq, counted flags
+  ;; ========================================
+
+  (define-command-line-options parse-short
+    [:short "-v" :arity 0 :description "verbose"]
+    [:short "-q" :arity 0 :description "quiet"]
+    [:short "-j" :long "--jobs" :type int :description "jobs"]
+    [:short "-n" :arity (0 2) :type int :description "numbers"]
+    [:short "-e" :arity (1 +) :description "words"]
+    [:short "-o" :long "--output" :description "output"]
+    [:short "-emit" :description "action"]
+    [:positional "rest" :arity (0 +)])
+
+  ;; a flag that was given, whatever the value that a given flag stands for
+  (define (given? value) (not (memq value '(#f absent))))
+
+  ;; -- attached values: -j4 ------------------------------------------------
+
+  (define-test test-short-option-with-an-attached-value
+    (CHECK eqv? ((parse-short '("-j4")) "j") 4)
+    (CHECK eqv? ((parse-short '("-j" "4")) "j") 4)
+    (CHECK eqv? ((parse-short '("-j=4")) "j") 4)
+    (CHECK equal? ((parse-short '("-ofile.txt")) "o") "file.txt")
+    (CHECK equal? ((parse-short '("-oa=b")) "o") "a=b"))
+
+  (define-test test-attached-value-is-the-first-of-several-arguments
+    (CHECK equal? ((parse-short '("-n5")) "n") '(5))
+    (CHECK equal? ((parse-short '("-n5" "6")) "n") '(5 6))
+    (CHECK equal? ((parse-short '("-n5" "6" "7")) "n") '(5 6))
+    (CHECK equal? ((parse-short '("-ex" "y" "z")) "e") '("x" "y" "z"))
+    (CHECK equal? ((parse-short '("-ex" "-q")) "e") '("x")))
+
+  (define-test test-attached-value-and-the-double-dash
+    (let ([option (parse-short '("-ea" "--" "b"))])
+      (CHECK equal? (option "e") '("a"))
+      (CHECK equal? (option "rest") '("b"))))
+
+  (define-test test-attached-value-is-converted
+    (CHECK equal? (error-message (lambda () (parse-short '("-jx")))) "invalid argument value")
+    (CHECK equal? (error-irritants (lambda () (parse-short '("-jx")))) '("-j" "x")))
+
+  (define-test test-option-without-its-argument-is-still-an-error
+    (CHECK equal? (error-message (lambda () (parse-short '("-o")))) "too few arguments for option")
+    (CHECK equal? (error-irritants (lambda () (parse-short '("-o")))) '("-o")))
+
+  (define-test test-long-options-do-not-have-attached-values
+    (CHECK eqv? ((parse-short '("--jobs" "4")) "j") 4)
+    (CHECK eqv? ((parse-short '("--jobs=4")) "j") 4)
+    (CHECK equal? (error-message (lambda () (parse-short '("--jobs4")))) "unknown option"))
+
+  (define-test test-a-whole-name-wins-over-an-attached-value
+    ;; -emit is defined, so it is not -e with the value mit
+    (let ([option (parse-short '("-emit" "ast"))])
+      (CHECK equal? (option "emit") "ast")
+      (CHECK equal? (option "e") '()))
+    (CHECK equal? ((parse-short '("-emit=ast")) "emit") "ast")
+    ;; -emi is not defined, it is -e with the value mi
+    (CHECK equal? ((parse-short '("-emi")) "e") '("mi")))
+
+  ;; -- clusters: -vq --------------------------------------------------------
+
+  (define-test test-flags-in-a-cluster
+    (let ([option (parse-short '("-vq"))])
+      (CHECK eq? (given? (option "v")) #t)
+      (CHECK eq? (given? (option "q")) #t))
+    (let ([option (parse-short '("-qv"))])
+      (CHECK eq? (given? (option "v")) #t)
+      (CHECK eq? (given? (option "q")) #t))
+    (let ([option (parse-short '("-v"))])
+      (CHECK eq? (given? (option "v")) #t)
+      (CHECK eq? (given? (option "q")) #f)))
+
+  (define-test test-a-cluster-ends-with-an-option-that-takes-arguments
+    (let ([option (parse-short '("-vqj4"))])
+      (CHECK eq? (given? (option "v")) #t)
+      (CHECK eq? (given? (option "q")) #t)
+      (CHECK eqv? (option "j") 4))
+    (let ([option (parse-short '("-vj" "4"))])
+      (CHECK eq? (given? (option "v")) #t)
+      (CHECK eqv? (option "j") 4))
+    (let ([option (parse-short '("-vj=4"))])
+      (CHECK eq? (given? (option "v")) #t)
+      (CHECK eqv? (option "j") 4))
+    (let ([option (parse-short '("-ve" "a" "b"))])
+      (CHECK eq? (given? (option "v")) #t)
+      (CHECK equal? (option "e") '("a" "b"))))
+
+  (define-test test-an-option-that-takes-arguments-ends-the-cluster
+    ;; -j takes "v" as its value, it is not the flag -v
+    (CHECK equal? (error-message (lambda () (parse-short '("-jv")))) "invalid argument value")
+    (let ([option (parse-short '("-ov"))])
+      (CHECK equal? (option "o") "v")
+      (CHECK eq? (given? (option "v")) #f)))
+
+  (define-test test-an-unknown-letter-in-a-cluster
+    (CHECK equal? (error-message (lambda () (parse-short '("-vz")))) "unknown option")
+    (CHECK equal? (error-irritants (lambda () (parse-short '("-vz")))) '("-vz"))
+    (CHECK equal? (error-irritants (lambda () (parse-short '("-zv")))) '("-zv"))
+    (CHECK equal? (error-irritants (lambda () (parse-short '("-v4")))) '("-v4")))
+
+  (define-test test-a-cluster-needs-the-letters-to-be-defined
+    (CHECK equal? (error-message (lambda () (parse-none '("-vq")))) "unknown option")
+    (CHECK equal? (error-irritants (lambda () (parse-none '("-vq")))) '("-vq")))
+
+  (define-test test-help-in-a-cluster
+    (let ([shown #f]
+          [specs (list (make-option-ast "-v" #f 0 0 #f "" #f #f))])
+      (parse-command-line specs '("-vh") (lambda (text) (set! shown text)))
+      (CHECK eq? (and shown #t) #t))
+    (let ([shown #f]
+          [specs (list (make-option-ast "-v" #f 0 0 #f "" #f #f))])
+      (parse-command-line specs '("-hv") (lambda (text) (set! shown text)))
+      (CHECK eq? (and shown #t) #t)))
+
+  (define-command-line-options parse-whole-names
+    [:short "-a" :arity 0]
+    [:short "-b" :arity 0]
+    [:short "-ab"])
+
+  (define-test test-a-whole-name-wins-over-a-cluster
+    ;; -ab is defined, so it is not -a -b
+    (let ([option (parse-whole-names '("-ab" "x"))])
+      (CHECK equal? (option "ab") "x")
+      (CHECK eq? (given? (option "a")) #f)
+      (CHECK eq? (given? (option "b")) #f))
+    (let ([option (parse-whole-names '("-a" "-b"))])
+      (CHECK eq? (given? (option "a")) #t)
+      (CHECK eq? (given? (option "b")) #t)))
+
+  (define-test test-clusters-and-positional-words-in-any-order
+    (let ([option (parse-short '("a" "-vq" "b" "-j3" "--" "-vq"))])
+      (CHECK eq? (given? (option "v")) #t)
+      (CHECK eqv? (option "j") 3)
+      (CHECK equal? (option "rest") '("a" "b" "-vq"))))
+
+  (define-test test-an-escaped-cluster-is-a-positional-word
+    (CHECK equal? ((parse-short '("\\-vq")) "rest") '("-vq")))
+
+  (define-test test-two-dashes-are-never-a-cluster
+    (CHECK equal? (error-message (lambda () (parse-short '("--vq")))) "unknown option")
+    (CHECK equal? (error-irritants (lambda () (parse-short '("--vq")))) '("--vq")))
+
+  ;; -- counted flags: -vvv --------------------------------------------------
+
+  (define-command-line-options parse-counted
+    [:short "-v" :long "--verbose" :arity 0 :count :description "more details, each time more"]
+    [:short "-q" :arity 0 :description "quiet"]
+    [:short "-n" :type int])
+
+  (define-test test-counted-flag
+    (CHECK eqv? ((parse-counted '()) "verbose") 0)
+    (CHECK eqv? ((parse-counted '("-v")) "verbose") 1)
+    (CHECK eqv? ((parse-counted '("-vvv")) "verbose") 3)
+    (CHECK eqv? ((parse-counted '("-v" "-v" "-v")) "v") 3)
+    (CHECK eqv? ((parse-counted '("--verbose" "-v")) "verbose") 2)
+    (CHECK eqv? ((parse-counted '("-vv" "-n" "3" "-v")) "v") 3))
+
+  (define-test test-counted-flag-in-a-cluster
+    (let ([option (parse-counted '("-vvq"))])
+      (CHECK eqv? (option "v") 2)
+      (CHECK eq? (given? (option "q")) #t))
+    (let ([option (parse-counted '("-vn3v"))])
+      (CHECK eqv? (option "v") 1)
+      (CHECK eqv? (option "n") 3)))
+
+  (define-test test-a-flag-that-is-not-counted-stays-a-flag
+    (CHECK eq? (given? ((parse-counted '("-q" "-q")) "q")) #t)
+    (CHECK eq? (given? ((parse-counted '("-qq")) "q")) #t)
+    (CHECK eq? (given? ((parse-counted '()) "q")) #f))
+
+  (define-test test-counted-flag-takes-no-argument
+    (CHECK equal? (error-message (lambda () (parse-counted '("--verbose=1"))))
+           "option does not take arguments"))
+
+  (define-command-line-options parse-counted-required
+    [:short "-v" :arity 0 :count :required])
+
+  (define-test test-counted-flag-may-be-required
+    (CHECK eqv? ((parse-counted-required '("-vv")) "v") 2)
+    (CHECK equal? (error-message (lambda () (parse-counted-required '()))) "missing required option"))
+
+  (define-test test-counted-flag-in-the-usage
+    (CHECK equal? ((parse-counted '()) 'help)
+           (string-append "Usage: " (program-name) " [options]\n"
+                          "\n"
+                          "Options:\n"
+                          "  -v, --verbose  more details, each time more\n"
+                          "  -q             quiet\n"
+                          "  -n <int>\n"
+                          "  -h, --help     show this help message and exit\n")))
+
+  (define-test test-definition-errors-of-count
+    (check-definition-rows
+     '((":count is only for a flag" [:short "-a" :count])
+       (":count is only for a flag" [:short "-a" :arity 2 :count])
+       (":count is only for a flag" [:short "-a" :arity (0 +) :count])
+       ("duplicate field" [:short "-a" :arity 0 :count :count])
+       ("unknown field, or field without a value" [:short "-a" :arity 0 :count #t])
+       (":count is a field of an option, not of a :positional clause" [:positional "a" :count])
+       (#f [:short "-a" :arity 0 :count])
+       (#f [:count :arity 0 :long "--abc"])
+       (#f [:short "-a" :arity (0 0) :count])
+       (#f [:short "-a" :arity 0 :count :required]))))
+
+  ;; ========================================
   ;; parse errors
   ;; ========================================
 
@@ -356,9 +561,10 @@
     (CHECK equal? (error-message (lambda () (parse '("--nope=1"))))
            "unknown option"))
 
-  (define-test test-error-clustered-short-options-unsupported
-    (CHECK equal? (error-message (lambda () (parse '("-vq"))))
-           "unknown option"))
+  (define-test test-error-unknown-letter-in-a-cluster
+    (CHECK equal? (error-message (lambda () (parse '("-vz"))))
+           "unknown option")
+    (CHECK equal? (error-irritants (lambda () (parse '("-vz")))) '("-vz")))
 
   (define-test test-error-negative-number-needs-escape
     (CHECK equal? (error-message (lambda () (parse '("-n" "-5"))))
