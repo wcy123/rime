@@ -2057,4 +2057,247 @@
                           "  [<y>] [<y>]\n"
                           "\n"
                           "Options:\n"
-                          "  -h, --help  show this help message and exit\n"))))
+                          "  -h, --help  show this help message and exit\n")))
+  ;; ========================================
+  ;; definition errors: which rule is broken, and where
+  ;; ========================================
+  ;; These tests carry what the unit tests of the AST and of the parser used to carry. A definition
+  ;; is expanded for real, and the message of the syntax violation tells which rule was broken.
+
+  (define definition-environment (environment '(rnrs (6)) '(rime command-line-options)))
+
+  ;; (definition-error clause ...) => the message of the syntax violation of the definition,
+  ;; #f when the definition is fine, and the symbol other-error for anything else
+  (define (definition-error . clauses)
+    (guard (e [(syntax-violation? e) (condition-message e)]
+              [else 'other-error])
+      (eval `(let () (define-command-line-options p ,@clauses) p) definition-environment)
+      #f))
+
+  ;; (definition-error-form clause ...) => the part of the definition the violation points at, as a datum
+  (define (definition-error-form . clauses)
+    (guard (e [(syntax-violation? e) (syntax->datum (syntax-violation-form e))]
+              [else 'other-error])
+      (eval `(let () (define-command-line-options p ,@clauses) p) definition-environment)
+      #f))
+
+  (define (starts-with? text prefix)
+    (and (>= (string-length text) (string-length prefix))
+         (string=? (substring text 0 (string-length prefix)) prefix)))
+
+  ;; the message has to begin with `expected` (the text after it may list the fields that exist);
+  ;; #f as `expected` means that the definition has to be fine
+  (define (message-matches? expected actual)
+    (if expected
+        (and (string? actual) (starts-with? actual expected))
+        (not actual)))
+
+  ;; rows are (expected-message clause ...); a mismatch shows the clauses and the message that came
+  (define (check-definition-rows rows)
+    (for-each
+     (lambda (row)
+       (let* ([expected (car row)]
+              [clauses (cdr row)]
+              [actual (apply definition-error clauses)])
+         (CHECK equal?
+                (list clauses (if (message-matches? expected actual) expected actual))
+                (list clauses expected))))
+     rows))
+
+  (define-test test-definition-errors-of-the-names
+    (check-definition-rows
+     '(("an option needs a :short or a :long name" [])
+       ("an option needs a :short or a :long name" [:description "x"])
+       ("an option needs a :short or a :long name" [:arity 2])
+       (":short name must look like" [:short "x"])
+       (":short name must look like" [:short "--abc"])
+       (":short name must look like" [:short "-"])
+       (":short name must look like" [:short "-a b"])
+       (":short name must look like" [:short "-a=b"])
+       (":short name must look like" [:short "-a,b"])
+       (":long name must look like" [:long "x"])
+       (":long name must look like" [:long "-x"])
+       (":long name must look like" [:long "--"])
+       (":long name must look like" [:long "---x"])
+       (":long name must look like" [:long "--a b"])
+       (":long name must look like" [:long "--a=b"])
+       (":short name must be a string or a symbol" [:short 42])
+       (":long name must be a string or a symbol" [:long 42])
+       (#f [:short "-a"])
+       (#f [:long "--abc"])
+       (#f [:short "-emit" :long "--emit"])
+       (#f [:short "-ab"])
+       (#f [:long "--a-b"]))))
+
+  (define-test test-definition-errors-of-the-names-that-are-taken
+    (check-definition-rows
+     '(("option name is defined twice" [:short "-a"] [:short "-a"])
+       ("option name is defined twice" [:long "--x"] [:long "--x"])
+       ("option name is defined twice" [:short "-a" :long "--x"] [:short "-b" :long "--x"])
+       ("option name is defined twice" [:short "-x"] [:long "--x"])
+       ("option name is defined twice" [:long "--x"] [:short "-x"])
+       ("-h and --help are reserved for the built-in help" [:short "-h"])
+       ("-h and --help are reserved for the built-in help" [:long "--help"])
+       ("-h and --help are reserved for the built-in help" [:short "-a" :long "--help"])
+       ("-h and --help are reserved for the built-in help" [:long "--h"])
+       (#f [:short "-a"] [:short "-b"] [:long "--c"])
+       (#f [:short "-emit" :long "--emit"] [:short "-opt" :long "--opt"]))))
+
+  (define-test test-definition-errors-of-the-arity
+    (check-definition-rows
+     '(("arity min must not exceed max" [:short "-a" :arity (3 2)])
+       ("arity must be n, (min max) or (min +)" [:short "-a" :arity -1])
+       ("arity must be n, (min max) or (min +)" [:short "-a" :arity (1 2 3)])
+       ("arity must be n, (min max) or (min +)" [:short "-a" :arity many])
+       ("arity must be n, (min max) or (min +)" [:short "-a" :arity 1.5])
+       ("arity must be n, (min max) or (min +)" [:short "-a" :arity (1 x)])
+       ("arity must be n, (min max) or (min +)" [:short "-a" :arity (-1 +)])
+       (#f [:short "-a" :arity 0])
+       (#f [:short "-a" :arity 3])
+       (#f [:short "-a" :arity (2 2)])
+       (#f [:short "-a" :arity (0 5)])
+       (#f [:short "-a" :arity (0 +)])
+       (#f [:short "-a" :arity (3 +)]))))
+
+  (define-test test-definition-errors-of-the-types
+    (check-definition-rows
+     '((":type and :choices must not be given when arity is 0" [:short "-a" :arity 0 :type int])
+       (":type and :choices must not be given when arity is 0" [:short "-a" :arity (0 0) :type int])
+       (":type and :choices must not be given when arity is 0" [:short "-a" :arity 0 :choices ("x")])
+       ("the converter is given twice" [:short "-a" :type int :choices ("x")])
+       ("the converter is given twice" [:short "-a" :choices ("x") :type int])
+       ("the converter is given twice" [:short "-a" :type int :type float])
+       (":choices needs at least one choice" [:short "-a" :choices ()])
+       (":choices must be a list of strings or integers" [:short "-a" :choices "x"])
+       (":choices must be a list of strings or integers" [:short "-a" :choices x])
+       ("a choice must be a string or an integer" [:short "-a" :choices (x)])
+       ("a choice must be a string or an integer" [:short "-a" :choices (1.5)])
+       ("a choice must be a string or an integer" [:short "-a" :choices (1.0)])
+       ("duplicate choice" [:short "-a" :choices ("x" "x")])
+       ("duplicate choice" [:short "-a" :choices (1 "1")])
+       ("duplicate choice" [:short "-a" :choices ("1" 1)])
+       (":description must be a string" [:short "-a" :description 42])
+       (":description must be a string" [:short "-a" :description x])
+       (#f [:short "-a" :type int])
+       (#f [:short "-a" :type float])
+       (#f [:short "-a" :type bool])
+       (#f [:short "-a" :type string])
+       (#f [:short "-a" :type string-upcase])
+       (#f [:short "-a" :type (lambda (s) s)])
+       (#f [:short "-a" :choices ("x" "y")])
+       (#f [:short "-a" :choices (1 2 "a")])
+       (#f [:short "-a" :arity (1 +) :choices ("x")])
+       (#f [:short "-a" :description ""]))))
+
+  (define-test test-definition-errors-of-required
+    (check-definition-rows
+     '(("a flag (arity 0) cannot be :required" [:short "-a" :arity 0 :required])
+       ("a flag (arity 0) cannot be :required" [:short "-a" :arity (0 0) :required])
+       ("duplicate field" [:short "-a" :required :required])
+       ("unknown field, or field without a value" [:short "-a" :required #t])
+       (#f [:short "-a" :required])
+       (#f [:required :long "--abc"])
+       (#f [:short "-a" :arity (0 +) :required]))))
+
+  (define-test test-definition-errors-of-the-clause-grammar
+    (check-definition-rows
+     '(("an option clause is a list of :key value pairs" "-a")
+       ("an option clause is a list of :key value pairs" 42)
+       ("an option clause is a list of :key value pairs" [:short "-a" . 5])
+       ("unknown field, or field without a value" [:short "-a" :long . 5])
+       ("unknown field, or field without a value" [:short "-a" 42])
+       ("unknown field, or field without a value" [:short "-a" "--long" "--x"])
+       ("unknown field, or field without a value" [:short "-a" :colour red])
+       ("unknown field, or field without a value" [:short "-a" :long])
+       ("unknown field, or field without a value" ["-n" :long "--count"])
+       (":long name must look like" [:short "-a" :long :arity :arity 1])
+       ("duplicate field" [:short "-a" :short "-b"])
+       ("duplicate field" [:long "--aa" :long "--bb"])
+       ("duplicate field" [:short "-a" :arity 1 :arity 2])
+       ("duplicate field" [:arity 1 :short "-a" :arity 1])
+       ("duplicate field" [:short "-a" :description "x" :description "y"])
+       ("duplicate field" [:short "-a" :description "x" :long "--bb" :description "y"]))))
+
+  (define-test test-definition-errors-of-the-whole-definition
+    (CHECK equal? (definition-error) #f)
+    (CHECK eq? (guard (e [(syntax-violation? e) #t] [else #f])
+                 (eval '(define-command-line-options "p" [:short "-a"]) definition-environment)
+                 #f)
+           #t)
+    (CHECK eq? (guard (e [(syntax-violation? e) #t] [else #f])
+                 (eval '(define-command-line-options) definition-environment)
+                 #f)
+           #t))
+
+  (define-test test-definition-errors-of-the-positionals
+    (check-definition-rows
+     '(("a positional name must not start with -" [:positional "-a"])
+       ("a positional name must not start with -" [:positional "--a"])
+       ("a positional name must not be empty or contain" [:positional ""])
+       ("a positional name must not be empty or contain" [:positional "a b"])
+       ("a positional name must not be empty or contain" [:positional "a=b"])
+       ("a positional name must not be empty or contain" [:positional "a,b"])
+       (":positional name must be a string or a symbol" [:positional 42])
+       ("unknown field, or field without a value" [:positional])
+       ("a clause is a list of :key value pairs" [:positional "a" . 5])
+       ("a positional argument must take at least one word" [:positional "a" :arity 0])
+       ("a positional argument must take at least one word" [:positional "a" :arity (0 0)])
+       ("arity min must not exceed max" [:positional "a" :arity (3 2)])
+       ("arity must be n, (min max) or (min +)" [:positional "a" :arity many])
+       ("duplicate field" [:positional "a" :positional "b"])
+       ("duplicate field" [:positional "a" :arity 1 :arity 2])
+       ("duplicate field" [:positional "a" :description "x" :description "y"])
+       ("the converter is given twice" [:positional "a" :type int :choices ("x")])
+       (":choices needs at least one choice" [:positional "a" :choices ()])
+       ("duplicate choice" [:positional "a" :choices ("x" "x")])
+       (":description must be a string" [:positional "a" :description 42])
+       ("unknown field, or field without a value" [:positional "a" :colour red])
+       ("unknown field, or field without a value" [:positional "a" :arity])
+       (":short is a field of an option, not of a :positional clause" [:positional "a" :short "-a"])
+       (":long is a field of an option, not of a :positional clause" [:positional "a" :long "--aa"])
+       (":required is a field of an option, not of a :positional clause" [:positional "a" :required])
+       ("-h and --help are reserved for the built-in help" [:positional "h"])
+       ("-h and --help are reserved for the built-in help" [:positional "help"])
+       ("positional name clashes with an option name" [:short "-v" :arity 0] [:positional "v"])
+       ("positional name clashes with an option name" [:long "--file"] [:positional "file"])
+       ("positional name clashes with an option name" [:positional "emit"] [:short "-emit" :long "--emit"])
+       ("positional name is defined twice" [:positional "a"] [:positional "a"])
+       ("positional name is defined twice" [:positional "a" :arity 2] [:positional "b"] [:positional "a" :arity (0 +)])
+       ("only one positional argument can take a variable number of words" [:positional "a" :arity (1 +)] [:positional "b" :arity (1 +)])
+       ("only one positional argument can take a variable number of words" [:positional "a" :arity (0 1)] [:positional "b" :arity (0 1)])
+       ("only one positional argument can take a variable number of words" [:positional "a" :arity (1 +)] [:positional "b" :arity (1 2)])
+       ("only one positional argument can take a variable number of words" [:positional "a" :arity (1 2)] [:positional "b"] [:positional "c" :arity (3 4)])
+       (#f [:positional "a"])
+       (#f [:positional "file" :arity (1 +) :type int :description "files"])
+       (#f [:arity 2 :description "d" :positional "p" :choices ("a" "b")])
+       (#f [:positional "a"] [:positional "b" :arity 2])
+       (#f [:positional "source" :arity (1 +)] [:positional "dest"])
+       (#f [:positional "first"] [:positional "middle" :arity (0 3)] [:positional "last" :arity 2])
+       (#f [:short "-v" :arity 0] [:positional "file" :arity (0 +)] [:long "--out"])
+       (#f [:positional "emit"] [:short "-e" :long "--exit"]))))
+
+  (define-test test-a-definition-error-points-at-the-offending-part
+    ;; the clause for a rule of the whole clause, the value or the field for a mistake in it
+    (CHECK equal? (definition-error-form '[:short "-a" :arity (3 2)]) '(:short "-a" :arity (3 2)))
+    (CHECK equal? (definition-error-form '[:short "-a" 42]) 42)
+    (CHECK equal? (definition-error-form '[:short "-a" :description 42]) 42)
+    (CHECK equal? (definition-error-form '[:short "-a"] '[:short "-a"]) '(:short "-a"))
+    (CHECK equal? (definition-error-form '[:short "-a"] '[:long "--b"]) #f))
+
+  ;; ========================================
+  ;; the converters of a definition
+  ;; ========================================
+
+  (define-command-line-options parse-identifier
+    [:short "-a" :type string-upcase])
+
+  (define-test test-a-custom-type-may-be-a-bare-procedure-name
+    (CHECK equal? ((parse-identifier '("-a" "abc")) "a") "ABC"))
+
+  (define-test test-a-type-named-like-a-builtin-is-the-builtin
+    (let ([parse-int (eval '(let ()
+                              (define-command-line-options p [:short "-a" :type int])
+                              p)
+                           definition-environment)])
+      (CHECK eqv? ((parse-int '("-a" "12")) "a") 12)))
+  )

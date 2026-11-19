@@ -493,12 +493,18 @@ a field in the record and a rule in `__ast.sls` if it has one, and a line in `__
 
 # Tests
 
-Each module has its own test file, `make test-chez/rime/command-line-options/<name>`:
+One test file, `test/rime/command-line-options-test.sls`, run with
+`make test-chez/rime/command-line-options-test` (and `test-guile/...`). Every test goes through the
+exported macro, so all three layers are exercised the way a program uses them: a definition is
+expanded for real, and the parser it defines is run. There are no tests of the internal modules.
 
-* `test/rime/command-line-options/__parse-test.sls`: reading, syntax to AST
-* `test/rime/command-line-options/__ast-test.sls`: the semantic rules, on records built by hand
-* `test/rime/command-line-options/__codegen-test.sls`: writing, AST to code, on records built by hand
-* `test/rime/command-line-options-test.sls`: the macro and the parser end to end
+| what                          | how it is tested                                                          |
+|-------------------------------|---------------------------------------------------------------------------|
+| the syntax and the rules of a definition | `check-definition-rows`: a table of definitions with the message of the syntax violation each one has to give, valid definitions are in the same tables so that a rule cannot pass by rejecting everything. `definition-error-form` checks which part of the definition the error points at |
+| the generated code            | the behaviour of the parser it defines: types, arity, `:required`, positionals |
+| the parser at runtime         | command lines in, values and errors out; the specs can also be built by hand with `make-option-ast`, for the converters and the usage |
+| the usage and `-h`            | the exact text; the real `-h` path, which calls `exit`, is exercised on Chez and on Guile |
 
-`make test-chez` runs everything, and the same with `test-guile`. The real `-h` path, which calls `exit`,
-is exercised on Chez and on Guile.
+A new rule of the definition syntax is one more row in a table, with its message. The message is
+compared as a prefix, so adding a field to the list in "unknown field ... (expected ...)" does not
+break the tests.
