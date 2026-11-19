@@ -171,10 +171,10 @@
           (fail "invalid option key" key))))
 
   ;; what the program gets for the converted arguments `items` (#f when none were given):
-  ;; present or absent for a flag, the value for exactly one argument, a list otherwise
+  ;; #t or #f for a flag, the value for exactly one argument, a list otherwise
   (define (value-of min max items)
     (cond
-     [(and (= 0 min) (= 0 max)) (if items 'present 'absent)]
+     [(and (= 0 min) (= 0 max)) (and items #t)]
      [(and (= 1 min) (= 1 max)) (and items (car items))]
      [else (or items '())]))
 
