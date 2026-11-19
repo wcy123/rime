@@ -296,7 +296,8 @@
   (define-test test-form-equals-empty-value-is-one-empty-argument-even-when-the-option-may-take-none
     (CHECK equal? ((parse '("--opt-list=")) "opt-list") '(""))
     (CHECK equal? ((parse '("-o=")) "o") '(""))
-    (CHECK equal? ((parse '("--range=")) "range") '("")))
+    ;; --range is an integer option, and an empty text is not an integer
+    (CHECK equal? (error-message (lambda () (parse '("--range=")))) "invalid argument value"))
 
   (define-test test-form-equals-empty-value-is-one-empty-argument-when-the-option-needs-one
     (CHECK equal? ((parse '("--files=")) "files") '(""))
