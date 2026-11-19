@@ -15,14 +15,22 @@
 
   ;; the generated definition, as a datum
   (define (generate parser . options)
-    (syntax->datum (generate-definition parser options)))
+    (syntax->datum (generate-definition parser options #f)))
 
   ;; what the definition looks like around the list of specs
   (define (definition parser . specs)
+    (definition* #f parser specs))
+
+  (define (definition* intermixed? parser specs)
     `(define ,parser
        (let ([specs (list ,@specs)])
          (lambda (arguments)
-           (parse-command-line specs arguments)))))
+           (parse-command-line specs arguments default-on-help ,intermixed?)))))
+
+  (define-test test-intermixed-is-passed-to-the-runtime
+    (CHECK equal?
+           (syntax->datum (generate-definition #'p (list (opt "-a" #f 1 1 #f "")) #t))
+           (definition* #t 'p '((make-option-ast "-a" #f 1 1 #f "" #f)))))
 
   (define-test test-no-options
     (CHECK equal? (generate #'parser) (definition 'parser)))

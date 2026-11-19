@@ -28,7 +28,7 @@ A runnable version is in `example/command-line-options.scm`.
 # Defining options
 
 ```scheme
-(define-command-line-options <parser>
+(define-command-line-options <parser> [:intermixed]
   [<field> ...]
   ...)
 ```
@@ -45,7 +45,7 @@ the list of command line arguments (without the program name).
 | `:choices (...)`     | the arguments must be one of these, see [Choices](#choices) | none       |
 | `:description "..."` | text shown by `--help`                                     | empty      |
 
-The keywords `:short :long :arity :type :choices :description` are exported by the library, so import it whole
+The keywords `:short :long :arity :type :choices :description :intermixed` are exported by the library, so import it whole
 (`(import (rime command-line-options))`); `(only (rime command-line-options) define-command-line-options)`
 would leave them unbound and the clauses would be rejected.
 
@@ -202,6 +202,31 @@ prog -v in.txt out.txt        ; positional: "in.txt" "out.txt"
 prog -v -- -x                 ; positional: "-x"
 prog in.txt -v                ; positional: "in.txt" "-v"   (-v is NOT the flag here)
 ```
+
+## Options after positional words: `:intermixed`
+
+By default the first positional word ends the options. Write `:intermixed` after the parser name to
+mix options and positional words, as GNU `getopt` and Python's `parse_intermixed_args` do:
+
+```scheme
+(define-command-line-options parse :intermixed
+  [:short "-emit" :long "--emit" :description "action"]
+  [:short "-opt"  :long "--opt"  :arity 0 :description "run the optimizer"])
+```
+
+An option-like word is an option wherever it is, and the positional words keep their order:
+
+```
+prog example.toy --emit=ast        ; --emit "ast", positional: "example.toy"
+prog example.toy -emit ast -opt    ; --emit "ast", -opt present, positional: "example.toy"
+prog a -opt b -opt c               ; positional: "a" "b" "c"
+prog example.toy -- --emit=ast     ; positional: "example.toy" "--emit=ast"   (the `--` is dropped)
+```
+
+Everything else is as in the default mode: `--` ends the options, `\-x` and a lone `-` are values,
+`-h` and `--help` work anywhere, an option with arity `(min max)` still takes the following ordinary
+words until it has `max` of them (with `(1 +)`, `prog a -e x y b` gives `-e` the words `"x" "y" "b"`),
+and an option given twice keeps its last occurrence.
 
 ## Arguments starting with `-`
 

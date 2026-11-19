@@ -8,14 +8,16 @@
           (rime command-line-options __ast)
           (rime command-line-options __runtime))
 
-  ;; parser: the identifier to define; options: list of option-ast
-  (define (generate-definition parser options)
+  ;; parser: the identifier to define; options: list of option-ast;
+  ;; intermixed?: whether options may come after positional words
+  (define (generate-definition parser options intermixed?)
     (with-syntax ([parser parser]
-                  [(spec ...) (map option->spec-expression options)])
+                  [(spec ...) (map option->spec-expression options)]
+                  [intermixed? (datum->syntax #'here intermixed?)])
       #'(define parser
           (let ([specs (list spec ...)])
             (lambda (arguments)
-              (parse-command-line specs arguments))))))
+              (parse-command-line specs arguments default-on-help intermixed?))))))
 
   ;; an expression that builds the same option-ast again, at runtime, for the runtime (__runtime.sls)
   ;; to work with: the values are emitted as they are, and the source is not needed there.

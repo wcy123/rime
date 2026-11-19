@@ -6,6 +6,7 @@
   (export parse-command-line
           format-usage
           program-name
+          default-on-help
           builtin-converters
           builtin-converter
           make-choice-converter
@@ -27,11 +28,13 @@
   ;; parsing the command line
   ;; ========================================
 
-  ;; (parse-command-line specs args [on-help]) => the accessor
+  ;; (parse-command-line specs args [on-help [intermixed?]]) => the accessor
+  ;; intermixed?: an option is an option wherever it is, a positional word does not end the options
   (define parse-command-line
     (case-lambda
-      [(specs args) (parse-command-line specs args default-on-help)]
-      [(specs args on-help)
+      [(specs args) (parse-command-line specs args default-on-help #f)]
+      [(specs args on-help) (parse-command-line specs args on-help #f)]
+      [(specs args on-help intermixed?)
        (let ([table (make-eq-hashtable)])   ; option -> the converted arguments
 
          ;; returns the positional arguments
@@ -44,6 +47,8 @@
              '()]
             [(option-like? (car tokens))
              (scan (parse-option (car tokens) (cdr tokens)))]
+            [intermixed?
+             (cons (unescape (car tokens)) (scan (cdr tokens)))]
             [else (map unescape tokens)]))
 
          ;; token is "-x", "--long" or "-x=a,b" / "--long=a,b"; returns the unconsumed tokens
