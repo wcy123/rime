@@ -2683,6 +2683,152 @@
       (CHECK equal? (option-ast-short o) #f)))
 
   ;; ========================================
+  ;; the recipes of the doc: what a program does with what the library gives
+  ;; ========================================
+
+  ;; the help hook: the program's own text around the usage
+  (define-command-line-options recipe-copy
+    [:short "-v" :long "--verbose" :arity 0 :description "print each file"]
+    [:positional "source" :arity (1 +) :description "files to copy"]
+    [:positional "dest" :description "where to copy them"])
+
+  (define (recipe-help-text usage)
+    (string-append "Copy files to a directory.\n\n" usage "\nExample: cp-lite a.txt b.txt dest/\n"))
+
+  (define-test test-recipe-help-hook-puts-text-around-the-usage
+    (let ([shown #f])
+      (recipe-copy '("-h") (lambda (usage) (set! shown (recipe-help-text usage))))
+      (CHECK eq? (and (starts-with? shown "Copy files to a directory.\n\nUsage: ") #t) #t)
+      (CHECK eq? (contains? shown "  -v, --verbose  print each file\n") #t)
+      (CHECK eq? (contains? shown "\nExample: cp-lite a.txt b.txt dest/\n") #t)))
+
+  ;; --version: the raw arguments are checked before the parse, up to a --
+  (define (recipe-asks-for-version? arguments)
+    (and (pair? arguments)
+         (not (string=? (car arguments) "--"))
+         (or (string=? (car arguments) "--version")
+             (recipe-asks-for-version? (cdr arguments)))))
+
+  (define-command-line-options recipe-needs-input
+    [:short "-i" :long "--input" :required :description "file to read"])
+
+  (define-test test-recipe-version-is-found-in-the-raw-arguments
+    (CHECK eq? (recipe-asks-for-version? '("--version")) #t)
+    (CHECK eq? (recipe-asks-for-version? '("-i" "a.txt" "--version")) #t)
+    (CHECK eq? (recipe-asks-for-version? '("-i" "a.txt")) #f)
+    (CHECK eq? (recipe-asks-for-version? '("--" "--version")) #f)
+    (CHECK eq? (recipe-asks-for-version? '()) #f))
+
+  (define-test test-recipe-the-parser-alone-cannot-answer-version-without-the-required-option
+    ;; this is why the check is made before the parse: the parser stops on the missing option
+    (CHECK eq? (command-line-error? (raised (lambda () (recipe-needs-input '("--version"))))) #t))
+
+  ;; a default from the environment, with the call-site default of the accessor
+  (define-command-line-options recipe-output
+    [:short "-o" :long "--output" :description "output file"])
+
+  (define (recipe-output-file option lookup)
+    (option "output" (or (lookup "CP_OUTPUT") "a.out")))
+
+  (define-test test-recipe-environment-gives-the-default
+    (let ([environment (lambda (name) (and (string=? name "CP_OUTPUT") "env.out"))]
+          [empty (lambda (name) #f)])
+      (CHECK equal? (recipe-output-file (recipe-output '()) empty) "a.out")
+      (CHECK equal? (recipe-output-file (recipe-output '()) environment) "env.out")
+      (CHECK equal? (recipe-output-file (recipe-output '("-o" "cli.out")) environment) "cli.out")))
+
+  ;; options that exclude each other, checked after the parse
+  (define-command-line-options recipe-format
+    [:long "--json" :arity 0 :description "write json"]
+    [:long "--text" :arity 0 :description "write text"])
+
+  (define (recipe-exclusive-conflict? option)
+    (and (option "json") (option "text")))
+
+  (define-test test-recipe-exclusive-options
+    (CHECK eq? (recipe-exclusive-conflict? (recipe-format '())) #f)
+    (CHECK eq? (recipe-exclusive-conflict? (recipe-format '("--json"))) #f)
+    (CHECK eq? (recipe-exclusive-conflict? (recipe-format '("--text"))) #f)
+    (CHECK eq? (recipe-exclusive-conflict? (recipe-format '("--json" "--text"))) #t))
+
+  ;; subcommands: dispatch on the first word, one parser per command
+  (define-command-line-options recipe-copy-command
+    [:short "-v" :arity 0 :description "print each file"]
+    [:positional "source" :arity (1 +)]
+    [:positional "dest"])
+
+  (define-command-line-options recipe-remove-command
+    [:long "--force" :arity 0 :description "do not ask"]
+    [:positional "file" :arity (1 +)])
+
+  (define (recipe-run arguments)
+    (cond
+     [(null? arguments) '(usage)]
+     [(string=? (car arguments) "copy")
+      (let ([option (recipe-copy-command (cdr arguments))])
+        (list 'copy (option "source") (option "dest")))]
+     [(string=? (car arguments) "remove")
+      (let ([option (recipe-remove-command (cdr arguments))])
+        (list 'remove (option "force") (option "file")))]
+     [else (list 'unknown-command (car arguments))]))
+
+  (define-test test-recipe-subcommands
+    (CHECK equal? (recipe-run '()) '(usage))
+    (CHECK equal? (recipe-run '("copy" "a" "b" "dest/")) '(copy ("a" "b") "dest/"))
+    (CHECK equal? (recipe-run '("remove" "--force" "x" "y")) '(remove #t ("x" "y")))
+    (CHECK equal? (recipe-run '("remove" "x")) '(remove #f ("x")))
+    (CHECK equal? (recipe-run '("frobnicate")) '(unknown-command "frobnicate"))
+    ;; each command checks its own arguments
+    (CHECK equal? (error-message (lambda () (recipe-run '("remove")))) "too few positional arguments")
+    (CHECK equal? (error-message (lambda () (recipe-run '("copy" "a")))) "too few positional arguments"))
+
+  ;; a verbosity level: -v 3, and 0 when it is not given
+  (define-command-line-options recipe-verbose
+    [:short "-v" :long "--verbose" :type int :metavar "level" :description "how much to print, 0 to 3"])
+
+  (define-test test-recipe-verbosity-level
+    (CHECK eqv? ((recipe-verbose '()) "verbose" 0) 0)
+    (CHECK eqv? ((recipe-verbose '("-v" "3")) "verbose" 0) 3)
+    (CHECK eqv? ((recipe-verbose '("--verbose=2")) "verbose" 0) 2)
+    (CHECK equal? (error-message (lambda () (recipe-verbose '("-v")))) "too few arguments for option")
+    (CHECK eq? (contains? ((recipe-verbose '()) "help") "-v, --verbose <level>") #t))
+
+  ;; the compact short forms are ordinary words: write -j 4 and -v -q
+  (define-command-line-options recipe-short-forms
+    [:short "-j" :long "--jobs" :type int :description "number of jobs"]
+    [:short "-v" :arity 0 :description "verbose"]
+    [:short "-q" :arity 0 :description "quiet"]
+    [:positional "file" :arity (0 +)])
+
+  (define-test test-recipe-short-forms-are-written-separately
+    (let ([separate (recipe-short-forms '("-j" "4" "-v" "-q" "a.txt"))]
+          [compact (recipe-short-forms '("-j4" "-vq" "a.txt"))])
+      (CHECK eqv? (separate "jobs") 4)
+      (CHECK eq? (separate "v") #t)
+      (CHECK eq? (separate "q") #t)
+      (CHECK equal? (separate "file") '("a.txt"))
+      ;; the compact forms are not read: they are words, and the flags are not set
+      (CHECK eq? (compact "jobs") #f)
+      (CHECK eq? (compact "v") #f)
+      (CHECK equal? (compact "file") '("-j4" "-vq" "a.txt"))))
+
+  ;; catching a wrong name early: the program reads every name it uses once, right after the parse
+  (define-command-line-options recipe-names
+    [:short "-i" :long "--input" :description "file to read"]
+    [:short "-c" :long "--count" :type int :description "repeat count"])
+
+  (define (recipe-read-every-name option names)
+    (for-each (lambda (name) (option name)) names))
+
+  (define-test test-recipe-a-wrong-name-fails-at-once-with-the-names-that-exist
+    (let ([option (recipe-names '("-i" "a.txt"))])
+      (recipe-read-every-name option '("input" "count"))
+      (CHECK equal? (error-message (lambda () (recipe-read-every-name option '("input" "cuont"))))
+             "unknown option")
+      (CHECK equal? (error-irritants (lambda () (recipe-read-every-name option '("input" "cuont"))))
+             '("cuont" ("i" "input" "c" "count")))))
+
+  ;; ========================================
   ;; definition errors: which rule is broken, and where
   ;; ========================================
   ;; These tests carry what the unit tests of the AST and of the parser used to carry. A definition
