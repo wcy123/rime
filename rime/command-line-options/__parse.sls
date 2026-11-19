@@ -11,7 +11,7 @@
           (rime command-line-options __keywords)
           (rime command-line-options __ast)
           (only (rime command-line-options __runtime)
-                builtin-converters builtin-converter make-choice-converter))
+                builtin-converters builtin-converter make-choice-converter procedure->converter))
 
   ;; (parse-options clauses) => list of option-ast
   ;;   input   clauses: the syntax of `clause ...` in (define-command-line-options parser clause ...),
@@ -23,10 +23,10 @@
   ;;                     [:long "--count" :type int]
   ;;                     [:short "-f" :long "--files" :arity (1 +) :type (lambda (s) s)]))
   ;;
-  ;;   => short  long      min  max        converter                 description
-  ;;      "-v"   #f        0    0          #f                        "verbose"
-  ;;      #f     "--count" 1    1          (builtin-converter 'int)  ""
-  ;;      "-f"   "--files" 1    unlimited  (lambda (s) s)            ""
+  ;;   => short  long      min  max        converter                                  description
+  ;;      "-v"   #f        0    0          #f                                         "verbose"
+  ;;      #f     "--count" 1    1          (builtin-converter 'int)                   ""
+  ;;      "-f"   "--files" 1    unlimited  (procedure->converter (lambda (s) s))      ""
   ;;
   ;;   (each record also keeps its clause as `source`)
   ;;
@@ -151,12 +151,13 @@
   ;; the :type value -> the expression of a converter, whether it is builtin or custom
   ;;   int            => #'(builtin-converter 'int), the lookup by name in the runtime
   ;;                     (see builtin-converters in __runtime.sls)
-  ;;   (lambda (s) s) => #'(lambda (s) s), the expression as it is
+  ;;   (lambda (s) s) => #'(procedure->converter (lambda (s) s)), the procedure becomes a converter
   (define (read-converter form)
     (if (assq (syntax->datum form) builtin-converters)
         (with-syntax ([name form])
           #'(builtin-converter 'name))
-        form))
+        (with-syntax ([procedure form])
+          #'(procedure->converter procedure))))
 
   ;; the :choices value, a list of literals -> a converter expression
   ;;   ("json" "text") => #'(make-choice-converter '("json" "text"))

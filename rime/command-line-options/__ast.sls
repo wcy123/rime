@@ -31,8 +31,8 @@
   ;; min         non-negative integer, the least number of arguments
   ;; max         non-negative integer, the most number of arguments, `unlimited` when there is no limit
   ;; converter   how to turn the text of an argument into a value, #f when none was given:
-  ;;               the expression of a converter procedure, builtin or custom; opaque here,
-  ;;               never inspected
+  ;;               an expression whose value is a converter object (see __runtime.sls) at compile
+  ;;               time, the converter object itself at runtime; opaque here, never inspected
   ;; description string
   ;; source      opaque, where the option came from; only handed back to `report` below, #f at runtime
   ;;

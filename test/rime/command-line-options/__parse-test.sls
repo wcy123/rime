@@ -133,12 +133,14 @@
 
   (define-test test-custom-converter-keeps-its-expression
     (let ([o (parse "-a" '(:type (lambda (s) s)))])
-      (CHECK equal? (syntax->datum (option-ast-converter o)) '(lambda (s) s))))
+      (CHECK equal? (syntax->datum (option-ast-converter o))
+           '(procedure->converter (lambda (s) s)))))
 
   (define-test test-custom-converter-may-be-an-identifier
     (let ([o (parse "-a" '(:type string-upcase))])
       ;; the identifier as it is, not a lookup by name: only string int float bool are builtin
-      (CHECK equal? (syntax->datum (option-ast-converter o)) 'string-upcase)))
+      (CHECK equal? (syntax->datum (option-ast-converter o))
+             '(procedure->converter string-upcase))))
 
   ;; ========================================
   ;; :choices

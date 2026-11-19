@@ -798,9 +798,9 @@
   (define-test test-format-usage-aligns-long-only-names
     (CHECK string=?
            (format-usage
-            (list (make-option-ast "-a" "--alpha" 1 1 convert-int "both" #f)
-                  (make-option-ast #f "--beta" 0 0 convert-string "long only" #f)
-                  (make-option-ast "-c" #f 0 0 convert-string "short only" #f))
+            (list (make-option-ast "-a" "--alpha" 1 1 (builtin-converter 'int) "both" #f)
+                  (make-option-ast #f "--beta" 0 0 (builtin-converter 'string) "long only" #f)
+                  (make-option-ast "-c" #f 0 0 (builtin-converter 'string) "short only" #f))
             "prog")
            (string-append
             "Usage: prog [options] [--] [arguments...]\n"
@@ -1008,12 +1008,12 @@
 
   (define usage-specs
     (list
-     (make-option-ast "-v" "--verbose" 0 0 convert-string "verbose output" #f)
-     (make-option-ast "-n" "--count" 1 1 convert-int "repeat count" #f)
-     (make-option-ast "-f" "--files" 1 unlimited convert-string "input files" #f)
-     (make-option-ast "-r" "--range" 0 2 convert-int "range" #f)
-     (make-option-ast "-q" #f 0 0 convert-string "quiet" #f)
-     (make-option-ast "-u" "--upper" 1 1 string-upcase "first line\nsecond line" #f)))
+     (make-option-ast "-v" "--verbose" 0 0 (builtin-converter 'string) "verbose output" #f)
+     (make-option-ast "-n" "--count" 1 1 (builtin-converter 'int) "repeat count" #f)
+     (make-option-ast "-f" "--files" 1 unlimited (builtin-converter 'string) "input files" #f)
+     (make-option-ast "-r" "--range" 0 2 (builtin-converter 'int) "range" #f)
+     (make-option-ast "-q" #f 0 0 (builtin-converter 'string) "quiet" #f)
+     (make-option-ast "-u" "--upper" 1 1 (procedure->converter string-upcase) "first line\nsecond line" #f)))
 
   (define-test test-format-usage
     (CHECK string=?
@@ -1060,9 +1060,9 @@
   (define-test test-format-usage-placeholders
     (let ([usage (format-usage
                   (list
-                   (make-option-ast "-a" #f 2 2 convert-int "d" #f)
-                   (make-option-ast "-b" #f 0 unlimited convert-string "d" #f)
-                   (make-option-ast "-c" #f 1 3 convert-float "d" #f))
+                   (make-option-ast "-a" #f 2 2 (builtin-converter 'int) "d" #f)
+                   (make-option-ast "-b" #f 0 unlimited (builtin-converter 'string) "d" #f)
+                   (make-option-ast "-c" #f 1 3 (builtin-converter 'float) "d" #f))
                   "p")])
       (CHECK eq? (and (contains? usage "-a <int> <int>") #t) #t)
       (CHECK eq? (and (contains? usage "-b [<string>...]") #t) #t)
@@ -1208,24 +1208,83 @@
 
   (define-test test-builtin-converters-is-an-association-list
     (CHECK equal? (map car builtin-converters) '(string int float bool))
-    (CHECK equal? (map cdr builtin-converters)
-           (list convert-string convert-int convert-float convert-bool))
-    (CHECK eq? (cdr (assq 'int builtin-converters)) convert-int)
+    (CHECK eq? (cdr (assq 'int builtin-converters)) (builtin-converter 'int))
     (CHECK eq? (assq 'lambda builtin-converters) #f))
 
-  (define-test test-builtin-converter-looks-up-by-name
-    (CHECK eq? (builtin-converter 'string) convert-string)
-    (CHECK eq? (builtin-converter 'int) convert-int)
-    (CHECK eq? (builtin-converter 'float) convert-float)
-    (CHECK eq? (builtin-converter 'bool) convert-bool))
+  (define-test test-builtin-converters-convert
+    ;; a converter is given the text and the name of the option
+    (CHECK equal? ((converter-convert (builtin-converter 'string)) "x y" "-a") "x y")
+    (CHECK eqv? ((converter-convert (builtin-converter 'int)) "12" "-a") 12)
+    (CHECK eqv? ((converter-convert (builtin-converter 'float)) "2" "-a") 2.0)
+    (CHECK eq? ((converter-convert (builtin-converter 'bool)) "yes" "-a") #t))
+
+  (define-test test-builtin-converters-report-their-own-failure
+    (for-each
+     (lambda (name)
+       (CHECK equal? (error-message (lambda () ((converter-convert (builtin-converter name)) "zz!" "-a")))
+              "invalid argument value"))
+     '(int float bool))
+    (CHECK equal? (error-irritants (lambda () ((converter-convert (builtin-converter 'int)) "zz!" "--count")))
+           '("--count" "zz!")))
+
+  (define-test test-choice-converter-reports-its-own-failure
+    (let ([convert (converter-convert (make-choice-converter '("a" 2)))])
+      (CHECK equal? (convert "a" "-m") "a")
+      (CHECK eqv? (convert "2" "-m") 2)
+      (CHECK equal? (error-message (lambda () (convert "b" "-m"))) "argument must be one of the choices")
+      (CHECK equal? (error-irritants (lambda () (convert "b" "-m"))) '("-m" "b" ("a" 2)))))
+
+  (define-test test-procedure-converter-turns-any-failure-into-an-invalid-argument
+    (let ([convert (converter-convert (procedure->converter (lambda (s) (raise 'bad))))])
+      (CHECK equal? (error-message (lambda () (convert "v" "-a"))) "invalid argument value")
+      (CHECK equal? (error-irritants (lambda () (convert "v" "-a"))) '("-a" "v")))
+    (let ([convert (converter-convert (procedure->converter string-upcase))])
+      (CHECK equal? (convert "v" "-a") "V")))
+
+  (define-test test-converters-have-a-label
+    (CHECK equal? (map (lambda (name) (converter-label (builtin-converter name)))
+                       '(string int float bool))
+           '("<string>" "<int>" "<float>" "<bool>"))
+    (CHECK equal? (converter-label (procedure->converter string-upcase)) "<value>")
+    (CHECK equal? (converter-label (make-choice-converter '("a" 2))) "{a,2}"))
+
+  ;; a converter that nothing in the runtime knows about: it brings its label, and it reports
+  ;; its own failure, given the text and the name of the option
+  (define hex-converter
+    (make-converter "<hex>"
+                    (lambda (text name)
+                      (or (string->number text 16)
+                          (error 'opt-parser "not a hexadecimal number" name text)))))
+
+  (define hex-spec (make-option-ast "-x" "--hex" 1 1 hex-converter "a hex number" #f))
+
+  (define-test test-a-new-kind-of-converter-needs-no-change-in-the-runtime
+    (CHECK eqv? ((parse-command-line (list hex-spec) '("--hex" "ff")) "-x") 255)
+    (CHECK eqv? ((parse-command-line (list hex-spec) '("-x=10")) "--hex") 16))
+
+  (define-test test-a-new-kind-of-converter-reports-its-own-failure
+    (CHECK equal? (error-message (lambda () (parse-command-line (list hex-spec) '("--hex" "zz"))))
+           "not a hexadecimal number")
+    (CHECK equal? (error-irritants (lambda () (parse-command-line (list hex-spec) '("--hex" "zz"))))
+           '("--hex" "zz")))
+
+  (define-test test-a-new-kind-of-converter-shows-its-own-label
+    (CHECK eq? (and (contains? (format-usage (list hex-spec) "p") "-x, --hex <hex>  a hex number") #t) #t))
+
+  (define-test test-a-custom-procedure-fails-with-the-conversion-message
+    (let ([spec (make-option-ast "-a" #f 1 1 (procedure->converter (lambda (s) (error 'x "no"))) "d" #f)])
+      (CHECK equal? (error-message (lambda () (parse-command-line (list spec) '("-a" "v"))))
+             "invalid argument value")
+      (CHECK equal? (error-irritants (lambda () (parse-command-line (list spec) '("-a" "v"))))
+             '("-a" "v"))))
 
   (define-test test-usage-names-a-builtin-converter-and-calls-a-custom-one-a-value
     (let ([usage (format-usage
-                  (list (make-option-ast "-a" #f 1 1 convert-int "d" #f)
-                        (make-option-ast "-b" #f 1 1 convert-float "d" #f)
-                        (make-option-ast "-c" #f 1 1 convert-bool "d" #f)
-                        (make-option-ast "-d" #f 1 1 convert-string "d" #f)
-                        (make-option-ast "-e" #f 1 1 string-upcase "d" #f))
+                  (list (make-option-ast "-a" #f 1 1 (builtin-converter 'int) "d" #f)
+                        (make-option-ast "-b" #f 1 1 (builtin-converter 'float) "d" #f)
+                        (make-option-ast "-c" #f 1 1 (builtin-converter 'bool) "d" #f)
+                        (make-option-ast "-d" #f 1 1 (builtin-converter 'string) "d" #f)
+                        (make-option-ast "-e" #f 1 1 (procedure->converter string-upcase) "d" #f))
                   "p")])
       (for-each
        (lambda (flag)

@@ -9,6 +9,10 @@
           builtin-converters
           builtin-converter
           make-choice-converter
+          procedure->converter
+          make-converter
+          converter-label
+          converter-convert
           convert-bool
           convert-int
           convert-float
@@ -78,16 +82,10 @@
          (define (store! spec name items)
            (hashtable-set! table spec (convert-items spec name items)))
 
+         ;; the converter reports its own failure, it is given the name of the option for that
          (define (convert-items spec name items)
-           (let ([converter (option-ast-converter spec)])
-             (map (lambda (item)
-                    (let ([text (unescape item)])
-                      (guard (e [else (if (choice-converter? converter)
-                                          (fail "argument must be one of the choices"
-                                                name text (choice-converter-choices converter))
-                                          (fail "invalid argument value" name text))])
-                        (apply-converter converter text))))
-                  items)))
+           (let ([convert (converter-convert (spec-converter spec))])
+             (map (lambda (item) (convert (unescape item) name)) items)))
 
          (make-accessor specs table (list->vector (scan args))))]))
 
@@ -176,7 +174,7 @@
   (define (placeholder spec)
     (let* ([min (option-ast-min spec)]
            [max (option-ast-max spec)]
-           [arg (converter-label (option-ast-converter spec))]
+           [arg (converter-label (spec-converter spec))]
            [mandatory (repeat min arg)])
       (join
        (cond
@@ -187,20 +185,6 @@
         [else
          (append mandatory (repeat (- max min) (string-append "[" arg "]")))])
        " ")))
-
-  ;; how an argument of the converter is shown in the usage:
-  ;;   <int> for a builtin one, by its name; <string> for no converter, which is the text as it is;
-  ;;   {json,text} for a list of choices; <value> for a custom one
-  (define (converter-label converter)
-    (cond [(not converter) "<string>"]
-          [(choice-converter? converter)
-           (string-append "{" (join (map choice->text (choice-converter-choices converter)) ",") "}")]
-          [else
-           (let loop ([entries builtin-converters])
-             (cond [(null? entries) "<value>"]
-                   [(eq? (cdr (car entries)) converter)
-                    (string-append "<" (symbol->string (car (car entries))) ">")]
-                   [else (loop (cdr entries))]))]))
 
   (define (repeat n x)
     (if (= n 0) '() (cons x (repeat (- n 1) x))))
@@ -256,25 +240,44 @@
   ;; converters, from the text of an argument to a value
   ;; ========================================
 
-  ;; (apply-converter converter text) => the value, or an error when the text does not suit
-  ;; a converter is a procedure, a list of choices, or #f for the text as it is
-  (define (apply-converter converter text)
-    (cond [(not converter) text]
-          [(choice-converter? converter) (choose (choice-converter-choices converter) text)]
-          [else (converter text)]))
+  ;; A converter turns the text of an argument into a value, and it deals with everything about that:
+  ;;   label    how an argument is shown in the usage: "<int>", "{json,text}"
+  ;;   convert  (convert text option-name) => the value; when the text does not suit, it raises the
+  ;;            error the user sees, so each kind of converter has its own failure
+  ;; The runtime only uses these two, it does not know which kinds of converter there are.
+  (define-record-type converter
+    (fields label convert))
 
-  ;; the choices are strings and exact integers; an integer is chosen by its usual text,
-  ;; and the value is the choice itself
-  (define (choose choices text)
-    (cond [(null? choices) (fail "not one of the choices" text)]
-          [(string=? (choice->text (car choices)) text) (car choices)]
-          [else (choose (cdr choices) text)]))
+  ;; the converter of an option; no converter means the text as it is
+  (define (spec-converter spec)
+    (or (option-ast-converter spec) (builtin-converter 'string)))
+
+  ;; a converter made of a procedure from the text to a value, which may fail in any way:
+  ;; whatever it raises is reported as an invalid argument value
+  (define (make-procedure-converter label procedure)
+    (make-converter label
+                    (lambda (text name)
+                      (guard (e [else (fail "invalid argument value" name text)])
+                        (procedure text)))))
+
+  ;; the converter of a :type written by the user, which is any procedure of one argument
+  (define (procedure->converter procedure)
+    (make-procedure-converter "<value>" procedure))
+
+  ;; a converter for a list of choices, strings and exact integers; an integer is chosen by its
+  ;; usual text and the value is the choice itself
+  (define (make-choice-converter choices)
+    (make-converter
+     (string-append "{" (join (map choice->text choices) ",") "}")
+     (lambda (text name)
+       (let loop ([rest choices])
+         (cond [(null? rest)
+                (fail "argument must be one of the choices" name text choices)]
+               [(string=? (choice->text (car rest)) text) (car rest)]
+               [else (loop (cdr rest))])))))
 
   (define (choice->text choice)
     (if (string? choice) choice (number->string choice)))
-
-  (define-record-type choice-converter
-    (fields choices))
 
   (define (convert-string s) s)
 
@@ -298,10 +301,10 @@
 
   ;; the converters that :type knows by name: the name -> the converter
   (define builtin-converters
-    (list (cons 'string convert-string)
-          (cons 'int convert-int)
-          (cons 'float convert-float)
-          (cons 'bool convert-bool)))
+    (list (cons 'string (make-procedure-converter "<string>" convert-string))
+          (cons 'int (make-procedure-converter "<int>" convert-int))
+          (cons 'float (make-procedure-converter "<float>" convert-float))
+          (cons 'bool (make-procedure-converter "<bool>" convert-bool))))
 
   (define (builtin-converter name)
     (cdr (assq name builtin-converters)))

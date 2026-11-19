@@ -370,7 +370,9 @@ The exported macro is just those two calls.
 | `__keywords.sls`                    | the field keywords `:short :long :arity :type :choices :description`         |
 | `__runtime.sls`                      | the runtime: parses the command line, builds the accessor, prints the usage; the builtin converters |
 
-Adding a builtin type means a converter and one entry in `builtin-converters`, both in `__runtime.sls`.
+A converter is an object with a label for the usage and a conversion that raises its own error, so the
+runtime does not know which kinds there are. Adding a kind of converter means one constructor in
+`__runtime.sls` (like `make-choice-converter`); a builtin type is also an entry in `builtin-converters`.
 Adding a field to the clause syntax means a keyword in `__keywords.sls` and a pattern in `__parse.sls`,
 a field in the record and a rule in `__ast.sls` if it has one, and a line in `__codegen.sls`.
 
