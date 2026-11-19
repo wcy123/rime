@@ -322,11 +322,35 @@
     (CHECK eqv? ((parse '("-n" "1" "-n" "2")) "n") 2)
     (CHECK equal? ((parse '("-s" "a" "--name" "b")) "s") "b"))
 
-  (define-test test-repeated-option-with-a-fixed-arity-last-wins
-    (CHECK equal? ((parse '("-p" "1" "2" "-p" "3" "4")) "pair") '(3 4)))
+  (define-test test-an-option-that-takes-several_arguments-collects-them-from-every-occurrence
+    ;; -p takes exactly two: the arguments of all the occurrences are joined, and the total is checked
+    (CHECK equal? ((parse '("-p" "1" "2")) "pair") '(1 2))
+    (CHECK equal? ((parse '("-p" "1" "-p" "2")) "pair") '(1 2))
+    (CHECK equal? ((parse '("--pair=1" "--pair=2")) "pair") '(1 2))
+    (CHECK equal? ((parse '("-p" "1" "-v" "-p" "2")) "pair") '(1 2)))
 
-  (define-test test-repeated-option-with-a-bounded-arity-last-wins
-    (CHECK equal? ((parse '("-r" "1" "2" "-r" "3")) "range") '(3)))
+  (define-test test-too-many-arguments-from-all-the-occurrences-is-an-error
+    (CHECK equal? (error-message (lambda () (parse '("-p" "1" "2" "-p" "3" "4"))))
+           "too many arguments for option")
+    (CHECK equal? (error-irritants (lambda () (parse '("-p" "1" "2" "-p" "3" "4")))) '("--pair"))
+    (CHECK equal? (error-message (lambda () (parse '("-p" "1" "-p" "2" "-p" "3"))))
+           "too many arguments for option"))
+
+  (define-test test-too-few-arguments-from-all-the-occurrences-is-an-error
+    (CHECK equal? (error-message (lambda () (parse '("-p" "1")))) "too few arguments for option")
+    (CHECK equal? (error-message (lambda () (parse '("-p" "1" "-v")))) "too few arguments for option")
+    (CHECK equal? (error-message (lambda () (parse '("--pair=1")))) "too few arguments for option"))
+
+  (define-test test-an-option-with-a-bounded-arity-collects-and-checks-the-total
+    (CHECK equal? ((parse '("-r" "1" "-r" "2")) "range") '(1 2))
+    (CHECK equal? ((parse '("-r" "-r" "1")) "range") '(1))
+    (CHECK equal? ((parse '("-r" "1" "2")) "range") '(1 2))
+    (CHECK equal? (error-message (lambda () (parse '("-r" "1" "2" "-r" "3")))) "too many arguments for option"))
+
+  (define-test test-an-option-with-at-most-one-argument-still-keeps-the-last
+    ;; --text takes zero or one argument: its value cannot hold more, so the last occurrence wins
+    (CHECK equal? ((parse-comma '("--text" "a" "--text" "b")) "text") '("b"))
+    (CHECK equal? ((parse-comma '("--text" "a" "--text")) "text") '()))
 
   (define-test test-repeated-option-without-an-upper-limit-adds-up
     (CHECK equal? ((parse '("-f" "a" "-f" "b")) "files") '("a" "b"))
