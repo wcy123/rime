@@ -8,14 +8,25 @@
           (rime command-line-options __ast)
           (rime command-line-options __runtime))
 
-  ;; parser: the identifier to define; options: list of option-ast
-  (define (generate-definition parser options)
+  ;; parser: the identifier to define; options: list of option-ast;
+  ;; positionals: list of positional-ast, in the order of the clauses
+  (define (generate-definition parser options positionals)
     (with-syntax ([parser parser]
-                  [(spec ...) (map option->spec-expression options)])
+                  [(spec ...) (map option->spec-expression options)]
+                  [(positional ...) (map positional->expression positionals)])
       #'(define parser
           (let ([specs (list spec ...)])
             (lambda (arguments)
-              (parse-command-line specs arguments))))))
+              (parse-command-line specs arguments default-on-help (list positional ...)))))))
+
+  ;; the same for the positional-ast
+  (define (positional->expression positional)
+    (with-syntax ([name (datum->syntax #'here (positional-ast-name positional))]
+                  [min (datum->syntax #'here (positional-ast-min positional))]
+                  [max (datum->syntax #'here (positional-ast-max positional))]
+                  [converter (or (positional-ast-converter positional) #'#f)]
+                  [description (datum->syntax #'here (positional-ast-description positional))])
+      #'(make-positional-ast name min max converter description #f)))
 
   ;; an expression that builds the same option-ast again, at runtime, for the runtime (__runtime.sls)
   ;; to work with: the values are emitted as they are, and the source is not needed there.

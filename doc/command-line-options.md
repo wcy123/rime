@@ -11,19 +11,20 @@ accessor for the options and the positional arguments. It works on Chez Scheme a
 (define-command-line-options parse
   [:short "-v" :long "--verbose" :arity 0 :description "print more details"]
   [:short "-n" :long "--count"   :arity 1 :type int :description "number of repetitions"]
-  [:short "-e" :long "--exclude" :arity (1 +) :description "patterns to exclude"])
+  [:short "-e" :long "--exclude" :arity (1 +) :description "patterns to exclude"]
+  [:positional "file" :description "the input file"])
 
 (define option (parse (cdr (command-line))))   ; for `prog -v --count 3 -e a b -- x`
 
-(option "-v")                          ; => present
-(option "--count")                     ; => 3
-(option "-n")                          ; => 3   (short and long name are the same option)
-(option "-e")                          ; => ("a" "b")
-(option 'number-of-positional-argument) ; => 1
-(option 0)                             ; => "x"
+(option "verbose")                     ; => present
+(option "count")                       ; => 3
+(option "n")                           ; => 3   (short and long name are the same option)
+(option "exclude")                     ; => ("a" "b")
+(option "file")                        ; => "x"
 ```
 
-A runnable version is in `example/command-line-options.scm`.
+The names to read an option by are the names without the dashes. A runnable version is in
+`example/command-line-options.scm`.
 
 # Defining options
 
@@ -33,8 +34,9 @@ A runnable version is in `example/command-line-options.scm`.
   ...)
 ```
 
-Each `[...]` clause defines one option. `<parser>` becomes a function of one argument,
-the list of command line arguments (without the program name).
+Each `[...]` clause defines one option, except a clause with `:positional`, which describes the
+positional arguments, see [Positional arguments](#positional-arguments). `<parser>` becomes a
+function of one argument, the list of command line arguments (without the program name).
 
 | field                | meaning                                                    | default    |
 |----------------------|------------------------------------------------------------|------------|
@@ -46,7 +48,7 @@ the list of command line arguments (without the program name).
 | `:description "..."` | text shown by `--help`                                     | empty      |
 | `:required`          | it is an error when the option is absent, see [Required options](#required-options) | optional |
 
-The keywords `:short :long :arity :type :choices :description :required` are exported by the library, so import it whole
+The keywords `:short :long :arity :type :choices :description :required :positional` are exported by the library, so import it whole
 (`(import (rime command-line-options))`); `(only (rime command-line-options) define-command-line-options)`
 would leave them unbound and the clauses would be rejected.
 
@@ -59,6 +61,11 @@ as syntax violations.
 Option names are strings: `:short "-b"` (a single dash) and `:long "--long-name"` (two dashes).
 Names must not contain `=`, `,` or whitespace. `-h` and `--help` are reserved.
 There is no clustering, `-vq` is an unknown option, not `-v -q`.
+
+The program reads an option by its name without the dashes: `"b"` for `:short "-b"`, `"long-name"`
+for `:long "--long-name"`. These names must be different for all options, so `[:short "-x"]` and
+`[:long "--x"]` cannot be defined in different options, but they can be the two names of the
+same one (`[:short "-emit" :long "--emit"]` is read as `"emit"`). `h` and `help` are reserved too.
 
 Both names are optional, but an option needs at least one. An option does not need a one-letter
 name, so there is no limit of one option per letter: a program can have any number of
@@ -74,7 +81,7 @@ options that only have a long name.
 Its usage table (`-h`), with a long name alone lined up under the long names:
 
 ```
-Usage: prog [options] [--] [arguments...]
+Usage: prog [options]
 
 Options:
   -q                     quiet
@@ -83,9 +90,10 @@ Options:
   -h, --help             show this help message and exit
 ```
 
-Symbols are accepted too, `[:short -b :long --long-name]` and `(option '-b)`, but
-strict R6RS readers (every `.sls` file on Chez, and files starting with `#!r6rs`) refuse
-to read `-b` or `--long-name` as symbols. Strings work everywhere, use them in portable code.
+A name can be a symbol when reading, `(option 'long-name)`. In the definition, symbols are accepted
+too, `[:short -b :long --long-name]`, but strict R6RS readers (every `.sls` file on Chez, and files
+starting with `#!r6rs`) refuse to read `-b` or `--long-name` as symbols. Strings work everywhere,
+use them in portable code.
 
 ## Arity
 
@@ -134,7 +142,7 @@ so it takes the place of `:type`: giving both is a syntax error, and so is givin
 
 ```
 $ prog -h
-Usage: prog [options] [--] [arguments...]
+Usage: prog [options]
 
 Options:
   -f, --format {json,text,yaml}  output format
@@ -162,7 +170,7 @@ Exception in opt-parser: argument must be one of the choices with irritants ("--
 
 ```
 $ copy -i a.txt
-"a.txt"                       ; (option "--input")
+"a.txt"                       ; (option "input")
 $ copy -o b.txt
 missing required option: ("--input")
 ```
@@ -172,19 +180,77 @@ a required `-o` with arity `(0 +)` is satisfied by `-o` alone. `-h` and `--help`
 required option, they print the usage first. A flag (arity `0`) cannot be `:required`, that is
 a syntax violation when the program is compiled.
 
+## Positional arguments
+
+The words of the command line that are not options are described by `:positional` clauses, one
+for each part of the command line, in the order they are written. A clause has a name, and the
+fields of an option that make sense for words: `:arity`, `:type`, `:choices` and `:description`.
+
+```scheme
+#!r6rs
+(import (rnrs (6)) (rime command-line-options))
+
+(define-command-line-options parse
+  [:short "-v" :arity 0 :description "verbose"]
+  [:positional "source" :arity (1 +) :description "files to copy"]
+  [:positional "dest" :description "where to copy them"])
+
+(define option (parse (cdr (command-line))))
+(write (option "source")) (newline)
+(write (option "dest")) (newline)
+```
+
+```
+$ cp-lite a b c
+("a" "b")
+"c"
+
+$ cp-lite -v a b
+("a")
+"b"
+
+$ cp-lite a
+Exception in opt-parser: too few positional arguments with irritant "dest"
+
+$ cp-lite
+Exception in opt-parser: too few positional arguments with irritant "source"
+```
+
+* The name is how the program reads the words, `(option "dest")`, and what the usage shows, `<dest>`.
+  It must not start with `-`, it must be different from the other positionals, and from the names of
+  the options.
+* `:arity` is how many words the positional takes, `1` when it is not given. A positional cannot
+  have arity `0`. The value follows the same rule as an option: with arity `1` the word itself,
+  with any other arity the list of words.
+* `:type` and `:choices` convert each word like they do for an option.
+* `:short`, `:long` and `:required` are for options, they are a syntax violation in this clause.
+  A positional is required when its minimum is 1 or more.
+* The words are shared out to the positionals in the order of the clauses. At most one positional
+  takes a variable number of words (its minimum is less than its maximum), all the others have an exact
+  arity. Each gets its exact number of words, and the variable one gets the words that are left.
+  So the words can only be shared out in one way, and `(0 1)` next to `(1 +)` is a syntax
+  violation instead of a guess. In the example, `source` is `(1 +)` and `dest` is `1`, so `dest`
+  is always the last word.
+* When there are not enough words, the error names the first positional that lacks words
+  (`too few positional arguments`). When there are too many, the error gives the words that no
+  positional takes (`too many positional arguments`). A variable positional with `+` never has too many.
+* Without a `:positional` clause the command line takes no positional words, and a word that is
+  not an option raises `unexpected positional argument`.
+
+How the words are given on the command line is in [Command line syntax](#command-line-syntax).
+
 # Reading the result
 
 `(parse arguments)` returns an accessor procedure, conventionally called `option`.
 
 | call                                    | result                                                      |
 |-----------------------------------------|-------------------------------------------------------------|
-| `(option "-b")` or `(option "--long")`  | the value of the option, by short or long name              |
-| `(option 0)`, `(option 1)`, ...         | the positional argument at that index, always a string      |
-| `(option 'number-of-positional-argument)` | the number of positional arguments                        |
-| `(option 'help)`                        | the usage text, as a string, the same text that `--help` prints |
+| `(option "name")`                       | the value of the option, by its short or long name without the dashes |
+| `(option "file")`                       | the words of a `:positional` clause, by its name            |
+| `(option "help")`                       | the usage text, as a string, the same text that `--help` prints |
 
-Symbols work as names as well, `(option (string->symbol "-b"))`.
-`'number-of-positional-argument` and `'help` are not option names, option names start with `-`.
+Symbols work as names as well, `(option 'name)`. Names that were not defined, with the dashes
+(`(option "-v")`), or an integer raise an error.
 
 What an option gives depends on its arity:
 
@@ -194,9 +260,9 @@ What an option gives depends on its arity:
 | `1` (also `(1 1)`)       | the converted value            | `#f`     |
 | anything else            | the list of converted values   | `()`     |
 
-An option that is given more than once keeps its last occurrence.
-Asking for an option that was not defined, an index out of range, or any other kind of key
-raises an error.
+The words of a `:positional` clause follow the same table, so with arity `1` the word itself is
+returned, and with any other arity the list of words. An option that is given more than once keeps
+its last occurrence. Asking for a name that was not defined, or any other kind of key, raises an error.
 
 # Command line syntax
 
@@ -217,11 +283,12 @@ prog --exclude=a,b,c          ; several arguments with =, separated by commas
   ambiguity, `--window=2`.
 * A flag does not accept `=`.
 
-## Positional arguments
+## Positional words
 
 Options and positional words can come in any order. A word that is an option is an option wherever it
 is, and a word that is not (and is not consumed as an argument of an option) is positional.
-The positional words keep their order.
+The positional words keep their order, and go to the `:positional` clauses, see
+[Positional arguments](#positional-arguments).
 `--` ends option parsing explicitly, everything after it is positional and kept as is, and
 the `--` itself is dropped.
 
@@ -261,7 +328,10 @@ under its first line.
 
 ```
 $ grep-lite -h
-Usage: /tmp/demo/grep-lite.scm [options] [--] [arguments...]
+Usage: /tmp/demo/grep-lite.scm [options] [--] [<file>...]
+
+Arguments:
+  [<file>...]  files to search
 
 Options:
   -v, --verbose                 print more details
@@ -295,15 +365,17 @@ Catch it with `guard`; the library never exits by itself except for `-h`.
 | `invalid argument value`           | the conversion failed                                 | the option name, the text |
 | `argument must be one of the choices` | the argument is not one of the `:choices`          | the option name, the text, the choices |
 | `missing required option`          | a `:required` option is absent                        | the long name, or the short name when there is no long one |
+| `too few positional arguments`     | fewer words than the `:positional` minimums           | the name of the first positional that lacks words |
+| `too many positional arguments`    | more words than the `:positional` maximums            | the words that no positional takes |
+| `unexpected positional argument`   | a word that is not an option, and no `:positional` clause | the words          |
 
 ```scheme
 (guard (e [(error? e) (display (condition-message e)) (newline) (exit 2)])
   (parse (cdr (command-line))))
 ```
 
-The accessor raises `unknown option` for names that were not defined,
-`positional argument index out of range` for a bad index, and `invalid option key`
-for anything that is not a string, a symbol or an exact integer.
+The accessor raises `unknown option` for names that were not defined (also a name with its dashes),
+and `invalid option key` for anything that is not a string or a symbol.
 
 # A complete example
 
@@ -321,69 +393,64 @@ The examples above were run with this program (`grep-lite.scm`), with
   [:short "-c" :long "--color"   :type bool :description "colored output (yes/no/on/off/true/false/1/0)"]
   [:short "-e" :long "--exclude" :arity (1 +) :description "patterns to exclude"]
   [:short "-w" :long "--window"  :arity (0 2) :type int :description "context lines before [and after]"]
-  [:short "-t" :long "--tag"     :type (lambda (s) (string-append "<" s ">")) :description "custom conversion"])
+  [:short "-t" :long "--tag"     :type (lambda (s) (string-append "<" s ">")) :description "custom conversion"]
+  [:positional "file" :arity (0 +) :description "files to search"])
 
 (define option (parse (cdr (command-line))))
 (for-each (lambda (name) (write name) (display " => ") (write (option name)) (newline))
-          '("-v" "-n" "-r" "-c" "-e" "-w" "-t"))
-(display "positionals: ")
-(write (let loop ([i 0])
-         (if (< i (option 'number-of-positional-argument))
-             (cons (option i) (loop (+ i 1)))
-             '())))
-(newline)
+          '("v" "n" "r" "c" "e" "w" "t" "file"))
 ```
 
 ```
 $ grep-lite
-"-v" => absent
-"-n" => #f
-"-r" => #f
-"-c" => #f
-"-e" => ()
-"-w" => ()
-"-t" => #f
-positionals: ()
+"v" => absent
+"n" => #f
+"r" => #f
+"c" => #f
+"e" => ()
+"w" => ()
+"t" => #f
+"file" => ()
 
 $ grep-lite -v --count 3 -r 0.25 -c yes -e a b c -w 2 -t x in.txt out.txt
-"-v" => present
-"-n" => 3
-"-r" => 0.25
-"-c" => #t
-"-e" => ("a" "b" "c")
-"-w" => (2)
-"-t" => "<x>"
-positionals: ("in.txt" "out.txt")
+"v" => present
+"n" => 3
+"r" => 0.25
+"c" => #t
+"e" => ("a" "b" "c")
+"w" => (2)
+"t" => "<x>"
+"file" => ("in.txt" "out.txt")
 
 $ grep-lite in.txt -v -n 3 out.txt
-"-v" => present
-"-n" => 3
-"-r" => #f
-"-c" => #f
-"-e" => ()
-"-w" => ()
-"-t" => #f
-positionals: ("in.txt" "out.txt")
+"v" => present
+"n" => 3
+"r" => #f
+"c" => #f
+"e" => ()
+"w" => ()
+"t" => #f
+"file" => ("in.txt" "out.txt")
 
 $ grep-lite --count=3 --exclude=a,b,c --window=1,2 -- -v file
-"-v" => absent
-"-n" => 3
-"-r" => #f
-"-c" => #f
-"-e" => ("a" "b" "c")
-"-w" => (1 2)
-"-t" => #f
-positionals: ("-v" "file")
+"v" => absent
+"n" => 3
+"r" => #f
+"c" => #f
+"e" => ("a" "b" "c")
+"w" => (1 2)
+"t" => #f
+"file" => ("-v" "file")
 
 $ grep-lite -t '\-dash' '\-file'
-"-v" => absent
-"-n" => #f
-"-r" => #f
-"-c" => #f
-"-e" => ()
-"-w" => ()
-"-t" => "<-dash>"
-positionals: ("-file")
+"v" => absent
+"n" => #f
+"r" => #f
+"c" => #f
+"e" => ()
+"w" => ()
+"t" => "<-dash>"
+"file" => ("-file")
 
 $ grep-lite -n abc
 Exception in opt-parser: invalid argument value with irritants ("-n" "abc")
@@ -411,11 +478,11 @@ The exported macro is just those two calls.
 
 | file (`rime/command-line-options/`) | job                                                                          |
 |-------------------------------------|------------------------------------------------------------------------------|
-| `../command-line-options.sls`       | the exported macro: `(generate-definition parser (parse-options clauses))`   |
+| `../command-line-options.sls`       | the exported macro: `(generate-definition parser options positional)`, from `(parse-options clauses)` |
 | `__parse.sls`                       | phase 1, read: walks the clauses and fields by pattern matching, builds records |
-| `__ast.sls`                         | the `option-ast` record, and the semantic rules (names, arity, converter, duplicates) |
+| `__ast.sls`                         | the `option-ast` and `positional-ast` records, and the semantic rules (names, arity, converter, duplicates) |
 | `__codegen.sls`                     | phase 2, write: generates the definition, which builds the same records again at runtime; never reads user syntax |
-| `__keywords.sls`                    | the field keywords `:short :long :arity :type :choices :description`         |
+| `__keywords.sls`                    | the field keywords `:short :long :arity :type :choices :description :required :positional` |
 | `__runtime.sls`                      | the runtime: parses the command line, builds the accessor, prints the usage; the builtin converters |
 
 A converter is an object with a label for the usage and a conversion that raises its own error, so the

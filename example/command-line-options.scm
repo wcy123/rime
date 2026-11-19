@@ -15,19 +15,18 @@
   [:short "-f" :long "--format" :choices ("json" "text" "yaml")
    :description "output format, one of the choices shown in the usage (the argument is checked)"]
   [:long "--retries" :type int
-   :description "how many times to try again when something fails (a long name only, no short name)"])
+   :description "how many times to try again when something fails (a long name only, no short name)"]
+  [:positional "file" :arity (0 +)
+   :description "the files to work on, any number of them"])
 
 (define option (parse (cdr (command-line))))
 
 (define (show name value)
   (display name) (display " => ") (write value) (newline))
 
-(show "-v" (option "-v"))                 ; present or absent
-(show "--count" (option "--count"))       ; an integer, or #f
-(show "-e" (option "-e"))                 ; a list of strings
-(show "--retries" (option "--retries"))   ; an integer, or #f
-(show "--format" (option "--format"))     ; one of the choices, or #f
-(show "positionals" (let loop ([i 0])
-                      (if (< i (option 'number-of-positional-argument))
-                          (cons (option i) (loop (+ i 1)))
-                          '())))
+(show "verbose" (option "verbose"))       ; present or absent
+(show "count" (option "count"))           ; an integer, or #f
+(show "exclude" (option "exclude"))       ; a list of strings
+(show "retries" (option "retries"))       ; an integer, or #f
+(show "format" (option "format"))         ; one of the choices, or #f
+(show "file" (option "file"))             ; the positional words, a list of strings
