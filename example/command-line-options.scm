@@ -19,7 +19,7 @@
   [:positional "file" :arity (0 +)
    :description "the files to work on, any number of them"])
 
-(define option (parse (cdr (command-line))))
+(define option (parse-or-exit parse (cdr (command-line))))
 
 (define (show name value)
   (display name) (display " => ") (write value) (newline))

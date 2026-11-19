@@ -36,7 +36,8 @@ The names to read an option by are the names without the dashes. A runnable vers
 
 Each `[...]` clause defines one option, except a clause with `:positional`, which describes the
 positional arguments, see [Positional arguments](#positional-arguments). `<parser>` becomes a
-function of one argument, the list of command line arguments (without the program name).
+function of one argument, the list of command line arguments (without the program name), and an
+optional second one, the [help hook](#help).
 
 | field                | meaning                                                    | default    |
 |----------------------|------------------------------------------------------------|------------|
@@ -402,8 +403,20 @@ Options:
   -h, --help                    show this help message and exit
 ```
 
-`(option 'help)` returns this same text as a string, to print it from the program,
-for example `(display (option 'help))`.
+`(option "help")` returns this same text as a string, to print it from the program,
+for example `(display (option "help"))`.
+
+The parser takes an optional second argument, the help hook: `(parse arguments on-help)`.
+When `-h` is on the command line, `(on-help usage-text)` is called instead of printing the usage and
+calling `(exit 0)`, and the parse goes on to return the accessor of what came before `-h`.
+It is the way to print the help somewhere else, or to exit with another code, and to test the help
+without intercepting `exit`.
+
+```scheme
+(define option
+  (parse (cdr (command-line))
+         (lambda (text) (display text (current-error-port)) (exit 0))))
+```
 
 The placeholder shows the arity: `<int> <int>` for 2, `<string>...` for `(1 +)`, `[<string>...]` for
 `(0 +)`, `[<int>] [<int>]` for `(0 2)`. A custom `:type` procedure is shown as `<value>`.
@@ -411,10 +424,16 @@ The program name is the first element of `(command-line)`.
 
 # Errors
 
-Problems with the command line raise an `&error` condition from `(error 'opt-parser message detail ...)`.
-The message says what went wrong, and the details are the values it is about: the option name, the text
-that did not fit, and so on. (R6RS calls the details "irritants": `condition-irritants` gives them as a list.)
-Catch the error with `guard`; the library never exits by itself except for `-h`.
+Problems with the command line raise a `&command-line-error` condition. It is also an `&error` with
+the who `opt-parser`, a message and details, what `(error 'opt-parser message detail ...)` makes: the
+message says what went wrong, and the details are the values it is about, the option name, the text
+that did not fit, and so on. So `error?`, `condition-message` and `condition-irritants` (the R6RS name
+for the details) work on it. The library never exits by itself except for `-h`, and `parse-or-exit` below.
+
+| call                              | result                                                  |
+|-----------------------------------|---------------------------------------------------------|
+| `(command-line-error? e)`         | `#t` for the problems of the table below, `#f` for any other condition |
+| `(command-line-error-usage e)`    | the usage text of the parser that raised it, the same text as `(option "help")` |
 
 | message                            | when                                                  | details                |
 |------------------------------------|-------------------------------------------------------|------------------------|
@@ -427,9 +446,38 @@ Catch the error with `guard`; the library never exits by itself except for `-h`.
 | `too many positional arguments`    | more words than the `:positional` maximums            | the words that no positional takes |
 | `unexpected positional argument`   | a word that is not an option, and no `:positional` clause | the words          |
 
+The usage is in the condition, so it can be printed when there is no accessor, which is the case when
+the command line is wrong. A program that only wants the usual reaction uses `parse-or-exit`:
+
 ```scheme
-(guard (e [(error? e) (display (condition-message e)) (newline) (exit 2)])
-  (parse (cdr (command-line))))
+(define option (parse-or-exit parse (cdr (command-line))))
+```
+
+It returns the accessor, and when the command line is wrong it prints the message, the details and
+the usage to the error port, and exits with `2`. Other errors are not caught.
+
+```
+$ copy -n abc -i a.txt
+copy: invalid argument value: "-n" "abc"
+
+Usage: copy [options]
+
+Options:
+  -i, --input <string>  file to read
+  -n, --count <int>     number of repetitions
+  -h, --help            show this help message and exit
+[exit 2]
+```
+
+A program that wants a different reaction catches the condition itself:
+
+```scheme
+(define option
+  (guard (e [(command-line-error? e)
+             (display (condition-message e) (current-error-port)) (newline (current-error-port))
+             (display (command-line-error-usage e) (current-error-port))
+             (exit 64)])
+    (parse (cdr (command-line)))))
 ```
 
 The accessor raises `unknown option` for names that were not defined (also a name with its dashes);
@@ -443,6 +491,9 @@ the text `names are read without the dashes`, and for any other name, the list o
 (option "verbos")     ; unknown option, details: "verbos" ("v" "verbose" "o" "output" "name" "file")
 (option "--verbose")  ; unknown option, details: "--verbose" "names are read without the dashes"
 ```
+
+These accessor errors are mistakes of the program, not of the command line: they are ordinary
+errors, and `command-line-error?` is `#f` for them.
 
 # A complete example
 
@@ -553,7 +604,7 @@ The exported macro is just those two calls.
 | `__ast.sls`                         | the `option-ast` and `positional-ast` records, and the semantic rules (names, arity, converter, duplicates) |
 | `__codegen.sls`                     | phase 2, write: generates the definition, which builds the same records again at runtime; never reads user syntax |
 | `__keywords.sls`                    | the field keywords `:short :long :arity :type :choices :description :required :positional` |
-| `__runtime.sls`                      | the runtime: parses the command line, builds the accessor, prints the usage; the builtin converters |
+| `__runtime.sls`                      | the runtime: parses the command line, builds the accessor, prints the usage; the `&command-line-error` condition and `parse-or-exit`; the builtin converters |
 
 A converter is an object with a label for the usage and a conversion that raises its own error, so the
 runtime does not know which kinds there are. Adding a kind of converter means one constructor in

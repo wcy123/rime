@@ -15,9 +15,13 @@
                   [(spec ...) (map option->spec-expression options)]
                   [(positional ...) (map positional->expression positionals)])
       #'(define parser
-          (let ([specs (list spec ...)])
-            (lambda (arguments)
-              (parse-command-line specs arguments default-on-help (list positional ...)))))))
+          (let ([specs (list spec ...)]
+                [positionals (list positional ...)])
+            (case-lambda
+              [(arguments)
+               (parse-command-line specs arguments default-on-help positionals)]
+              [(arguments on-help)
+               (parse-command-line specs arguments on-help positionals)])))))
 
   ;; the same for the positional-ast
   (define (positional->expression positional)
