@@ -303,7 +303,8 @@
     (CHECK equal? ((parse '("--files=")) "files") '(""))
     (CHECK equal? ((parse '("-f=")) "f") '(""))
     (CHECK equal? ((parse '("--name=")) "name") "")
-    (CHECK equal? (error-message (lambda () (parse '("--pair=")))) "too few arguments for option")
+    ;; --pair is an integer option too: the empty text is converted first, and it is not an integer
+    (CHECK equal? (error-message (lambda () (parse '("--pair=")))) "invalid argument value")
     (CHECK equal? (error-message (lambda () (parse '("--count=")))) "invalid argument value"))
 
   (define-test test-form-mixed
@@ -315,14 +316,84 @@
       (CHECK eqv? (option "x") 0.5)))
 
   ;; ========================================
-  ;; repeated option
+  ;; repeated option: an option with an upper limit keeps its last occurrence, one without adds up
   ;; ========================================
 
-  (define-test test-repeated-option-last-wins
-    (let ([option (parse '("-n" "1" "-n" "2"))])
-      (CHECK eqv? (option "n") 2))
-    (let ([option (parse '("-f" "a" "-f" "b" "c"))])
-      (CHECK equal? (option "f") '("b" "c"))))
+  (define-test test-repeated-option-with-one-argument-last-wins
+    (CHECK eqv? ((parse '("-n" "1" "-n" "2")) "n") 2)
+    (CHECK equal? ((parse '("-s" "a" "--name" "b")) "s") "b"))
+
+  (define-test test-an-option-that-takes-several_arguments-collects-them-from-every-occurrence
+    ;; -p takes exactly two: the arguments of all the occurrences are joined, and the total is checked
+    (CHECK equal? ((parse '("-p" "1" "2")) "pair") '(1 2))
+    (CHECK equal? ((parse '("-p" "1" "-p" "2")) "pair") '(1 2))
+    (CHECK equal? ((parse '("--pair=1" "--pair=2")) "pair") '(1 2))
+    (CHECK equal? ((parse '("-p" "1" "-v" "-p" "2")) "pair") '(1 2)))
+
+  (define-test test-too-many-arguments-from-all-the-occurrences-is-an-error
+    (CHECK equal? (error-message (lambda () (parse '("-p" "1" "2" "-p" "3" "4"))))
+           "too many arguments for option")
+    (CHECK equal? (error-irritants (lambda () (parse '("-p" "1" "2" "-p" "3" "4")))) '("--pair"))
+    (CHECK equal? (error-message (lambda () (parse '("-p" "1" "-p" "2" "-p" "3"))))
+           "too many arguments for option"))
+
+  (define-test test-too-few-arguments-from-all-the-occurrences-is-an-error
+    (CHECK equal? (error-message (lambda () (parse '("-p" "1")))) "too few arguments for option")
+    (CHECK equal? (error-message (lambda () (parse '("-p" "1" "-v")))) "too few arguments for option")
+    (CHECK equal? (error-message (lambda () (parse '("--pair=1")))) "too few arguments for option"))
+
+  (define-test test-an-option-with-a-bounded-arity-collects-and-checks-the-total
+    (CHECK equal? ((parse '("-r" "1" "-r" "2")) "range") '(1 2))
+    (CHECK equal? ((parse '("-r" "-r" "1")) "range") '(1))
+    (CHECK equal? ((parse '("-r" "1" "2")) "range") '(1 2))
+    (CHECK equal? (error-message (lambda () (parse '("-r" "1" "2" "-r" "3")))) "too many arguments for option"))
+
+  (define-test test-an-option-with-at-most-one-argument-still-keeps-the-last
+    ;; --text takes zero or one argument: its value cannot hold more, so the last occurrence wins
+    (CHECK equal? ((parse-comma '("--text" "a" "--text" "b")) "text") '("b"))
+    (CHECK equal? ((parse-comma '("--text" "a" "--text")) "text") '()))
+
+  (define-test test-repeated-option-without-an-upper-limit-adds-up
+    (CHECK equal? ((parse '("-f" "a" "-f" "b")) "files") '("a" "b"))
+    (CHECK equal? ((parse '("-f" "a" "b" "-f" "c")) "files") '("a" "b" "c"))
+    (CHECK equal? ((parse '("--files=a" "--files=b" "-f=c")) "files") '("a" "b" "c"))
+    (CHECK equal? ((parse '("-f" "a" "-v" "--files" "b")) "files") '("a" "b")))
+
+  (define-test test-repeated-zero-or-more-option-adds-up
+    (CHECK equal? ((parse '("-o" "a" "-o" "b")) "opt-list") '("a" "b"))
+    (CHECK equal? ((parse '("-o" "-o" "a")) "opt-list") '("a"))
+    (CHECK equal? ((parse '("-o" "-o")) "opt-list") '()))
+
+  (define-command-line-options parse-numbers
+    [:short "-n" :long "--num" :arity (1 +) :type int]
+    [:long "--level" :arity (1 +) :choices (1 2 4)]
+    [:positional "rest" :arity (0 +)])
+
+  (define-test test-every-repeated-value-is-converted-and-checked
+    (CHECK equal? ((parse-numbers '("-n" "1" "-n" "2" "3")) "num") '(1 2 3))
+    (CHECK equal? (error-message (lambda () (parse-numbers '("-n" "1" "-n" "x")))) "invalid argument value")
+    (CHECK equal? ((parse-numbers '("--level" "1" "--level" "4")) "level") '(1 4))
+    (CHECK equal? (error-message (lambda () (parse-numbers '("--level" "1" "--level" "3"))))
+           "argument must be one of the choices"))
+
+  (define-test test-a-default-is-used-only-when-the-option-was-not-given
+    (CHECK equal? ((parse '()) "files" '("d")) '("d"))
+    (CHECK equal? ((parse '("-f" "a" "-f" "b")) "files" '("d")) '("a" "b")))
+
+  (define-test test-the-last-repeated-option-takes-the-words-after-it
+    ;; an option without an upper limit takes every ordinary word that follows, the last one included
+    (let ([option (parse '("-f" "a" "-f" "b" "file.c"))])
+      (CHECK equal? (option "files") '("a" "b" "file.c"))
+      (CHECK equal? (option "args") '()))
+    (let ([option (parse '("-f" "a" "-f" "b" "--" "file.c"))])
+      (CHECK equal? (option "files") '("a" "b"))
+      (CHECK equal? (option "args") '("file.c")))
+    (let ([option (parse '("-f" "a" "-f=b" "file.c"))])
+      (CHECK equal? (option "files") '("a" "b"))
+      (CHECK equal? (option "args") '("file.c"))))
+
+  (define-test test-a-flag-repeated-stays-true
+    (CHECK eq? ((parse '("-v" "-v" "--verbose")) "v") #t))
 
   ;; ========================================
   ;; escape with backslash
@@ -549,9 +620,9 @@
     ;; 1,2,3 is one argument, and not an integer
     (CHECK equal? (error-message (lambda () (parse '("--range=1,2,3"))))
            "invalid argument value")
-    ;; --pair needs two arguments, = gives one
+    ;; --pair is an integer option too, and the one text 1,2,3 is not an integer
     (CHECK equal? (error-message (lambda () (parse '("--pair=1,2,3"))))
-           "too few arguments for option"))
+           "invalid argument value"))
 
   (define-test test-equals-form-of-a-typed-one-argument-option-is-not-split
     (CHECK equal? (error-message (lambda () (parse '("--count=1,2"))))

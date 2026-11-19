@@ -295,8 +295,71 @@ What an option gives depends on its arity:
 | anything else            | the list of converted values   | `()`     |
 
 The words of a `:positional` clause follow the same table, so with arity `1` the word itself is
-returned, and with any other arity the list of words. An option that is given more than once keeps
-its last occurrence. Asking for a name that was not defined, or any other kind of key, raises an error.
+returned, and with any other arity the list of words. A repeated option is described in
+[Repeating an option](#repeating-an-option). Asking for a name that was not defined, or any other kind of key, raises an error.
+
+## Repeating an option
+
+An option that is given more than once follows its arity:
+
+* An option that takes several arguments, `max` above 1 (`2`, `(0 2)`, `(1 +)`, ...), collects the
+  arguments of all its occurrences in one flat list, in order. The total is checked when the whole
+  command line has been read: at least `min` and at most `max`, otherwise it is an error
+  (`too few` or `too many arguments for option`). With no upper limit, `(1 +)`, only the minimum can fail.
+* Any other option, a flag or an option with at most one argument (`0`, `1`, `(0 1)`), keeps its last
+  occurrence. This is what argparse and click do, and it lets a wrapper or an alias set a default that
+  the user can override.
+
+```scheme
+(define-command-line-options parse
+  [:short "-n" :long "--count" :type int :description "repeat count"]
+  [:short "-s" :long "--size" :arity 2 :type int :description "width and height"]
+  [:short "-I" :long "--include" :arity (1 +) :description "directories to search"]
+  [:positional "file" :arity (0 +)])
+```
+
+```
+$ prog -n 1 -n 2                        ; one argument: the last one wins
+"count" => 2
+
+$ prog -s 10 20
+"size" => (10 20)
+
+$ prog -s 10 -s 20                      ; several arguments: they are collected
+"size" => (10 20)
+
+$ prog --size=10 --size=20              ; = gives one argument each time
+"size" => (10 20)
+
+$ prog -s 10 20 -s 30 40                ; the total is 4, and -s takes 2
+Exception in opt-parser: too many arguments for option with irritant "--size"
+
+$ prog -s 10                            ; the total is 1
+Exception in opt-parser: too few arguments for option with irritant "--size"
+
+$ prog -I a -I b                        ; no upper limit: they add up
+"include" => ("a" "b")
+
+$ prog -I a b -I c
+"include" => ("a" "b" "c")
+
+$ prog -I a -I b main.c                 ; the last -I also takes main.c
+"include" => ("a" "b" "main.c")
+"file" => ()
+
+$ prog -I a -I=b main.c                 ; = takes exactly one argument
+"include" => ("a" "b")
+"file" => ("main.c")
+```
+
+* The value of an option that takes several arguments is always a flat list of the same kind of value,
+  `(10 20)` however many occurrences it came from; the occurrences are not kept apart.
+* Each occurrence is converted and checked on its own, so a bad value in the second one is
+  `invalid argument value`.
+* An option that takes several arguments takes every ordinary word after it, up to its maximum, also
+  after the last occurrence: `-I a -I b main.c` gives `main.c` to `-I`. Write `-I=b main.c`, which takes
+  exactly one argument, or put `--` before the file.
+* A default given to the accessor is used only when the option was not given at all.
 
 ## A default for an option that was not given
 
@@ -365,8 +428,9 @@ prog --exclude=a file          ; with =, exactly one argument, "file" is a posit
   There is no comma list. The words that follow are not consumed, so `=` is the way to stop an option that
   takes a variable number of arguments (`--exclude=a file` leaves `file` positional, `--exclude a file`
   would take it), and the way to give an optional argument without ambiguity, `--window=2`.
-* An option that needs two or more arguments cannot use `=`, which gives one: `--pair=3,4` is
-  `too few arguments for option`, write `--pair 3 4`.
+* An option that needs two or more arguments can use `=` once for each argument, `--pair=3 --pair=4`,
+  see [Repeating an option](#repeating-an-option). `--pair=3,4` is one argument, `too few arguments for
+  option`: write `--pair 3 4`.
 * A flag does not accept `=`.
 
 ```
@@ -414,7 +478,7 @@ prog in.txt -- -v             ; positional: "in.txt" "-v"   (-v is NOT the flag 
 An option with arity `(min max)` takes the following ordinary words until it has `max` of them, or the
 next word is an option or `--`. With arity `(1 +)`, `prog a -e x y b` gives `-e` the words `"x" "y" "b"`
 and the positional word `"a"`; write `prog a -e x y -- b` to keep `b` positional.
-An option given twice keeps its last occurrence.
+A repeated option is described in [Repeating an option](#repeating-an-option).
 
 ## Words that start with `-`
 
@@ -517,7 +581,8 @@ for the details) work on it. The library never exits by itself except for `-h`, 
 
 | message                            | when                                                  | details                |
 |------------------------------------|-------------------------------------------------------|------------------------|
-| `too few arguments for option`     | fewer than `min` arguments, also `--name=x` for an option that needs two or more | the option name        |
+| `too few arguments for option`     | fewer than `min` arguments, for an option that takes several: in total, from all its occurrences | the option name        |
+| `too many arguments for option`    | more than `max` arguments in total, from several occurrences of an option that takes several | the option name        |
 | `option does not take arguments`   | `--flag=1` on an arity 0 option                       | the option name        |
 | `invalid argument value`           | the conversion failed                                 | the option name, the text |
 | `argument must be one of the choices` | the argument is not one of the `:choices`          | the option name, the text, the choices |
