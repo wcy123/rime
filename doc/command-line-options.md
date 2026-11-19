@@ -453,7 +453,7 @@ the command line is wrong. A program that only wants the usual reaction uses `pa
 (define option (parse-or-exit parse (cdr (command-line))))
 ```
 
-It returns the accessor, and when the command line is wrong it prints the message, the irritants and
+It returns the accessor, and when the command line is wrong it prints the message, the details and
 the usage to the error port, and exits with `2`. Other errors are not caught.
 
 ```

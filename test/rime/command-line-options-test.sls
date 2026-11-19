@@ -632,9 +632,9 @@
            (CHECK equal? (list arguments (and e (command-line-error-usage e)))
                   (list arguments usage))))
        '(("-n" "abc")           ; invalid argument value
-         ("--nope")             ; unknown option
+         ("--pair=1")           ; too few arguments for option, --pair needs two
          ("-n")                 ; too few arguments for option
-         ("--count=1,2")        ; too many arguments for option
+         ("--count=1,2")        ; invalid argument value, 1,2 is not an integer
          ("--verbose=1")))))    ; option does not take arguments
 
   (define-test test-missing-required-option-carries-the-usage
