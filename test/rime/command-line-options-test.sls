@@ -1905,7 +1905,7 @@
       (CHECK eqv? (option "ratio") 2.0)))
 
   (define-test test-given-list-option-is-not-added-to-the-default
-    (CHECK equal? ((parse-default '("--exclude=x,y")) "exclude") '("x" "y"))
+    (CHECK equal? ((parse-default '("--exclude" "x" "y")) "exclude") '("x" "y"))
     (CHECK equal? ((parse-default '("--tags" "t")) "tags") '("t"))
     (CHECK equal? ((parse-default '("--tags")) "tags") '()))
 
