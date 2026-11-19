@@ -4,6 +4,12 @@
 ;; and prints the usage.
 (library (rime command-line-options __runtime)
   (export parse-command-line
+          scan-tokens
+          parse-result-table
+          parse-result-words
+          parse-result-help-asked?
+          distribute-words
+          check-required
           format-usage
           program-name
           default-on-help
@@ -28,6 +34,13 @@
   ;; parsing the command line
   ;; ========================================
 
+  ;; The parser is a few steps, each a function with its inputs and outputs:
+  ;;   scan-tokens             the command line -> the options, in a table, and the positional words
+  ;;   check-required          every :required option is in the table
+  ;;   distribute-words        the positional words -> the words of each positional
+  ;;   store-positional-words! convert them and put them in the table
+  ;; parse-command-line calls them in this order and builds the accessor.
+
   ;; (parse-command-line specs args [on-help [positionals]]) => the accessor
   ;;   positionals: list of positional-ast, '() when the command line takes no positional words
   (define parse-command-line
@@ -35,94 +48,119 @@
       [(specs args) (parse-command-line specs args default-on-help '())]
       [(specs args on-help) (parse-command-line specs args on-help '())]
       [(specs args on-help positionals)
-       (let ([table (make-eq-hashtable)])   ; option -> the converted arguments
+       (let* ([result (scan-tokens specs
+                                   (lambda () (on-help (format-usage specs (program-name) positionals)))
+                                   args)]
+              [table (parse-result-table result)])
+         (unless (parse-result-help-asked? result)
+           (check-required specs table)
+           (store-positional-words! table (distribute-words positionals (parse-result-words result))))
+         (make-accessor specs positionals table))]))
 
-         (define help-asked? #f)
+  ;; table          option-ast or positional-ast -> the converted arguments, of what was given
+  ;; words          the positional words, in order, the ones before -- unescaped
+  ;; help-asked?    #t when -h or --help was met, the words after it are not read
+  (define-record-type parse-result
+    (fields table words help-asked?))
 
-         ;; returns the positional arguments; options and positional words may come in any order
-         (define (scan tokens)
-           (cond
-            [(null? tokens) '()]
-            [(string=? (car tokens) "--") (cdr tokens)]
-            [(member (car tokens) '("-h" "--help"))
-             (set! help-asked? #t)
-             (on-help (format-usage specs (program-name) positionals))
-             '()]
-            [(option-like? (car tokens) specs)
-             (scan (parse-option (car tokens) (cdr tokens)))]
-            [else (cons (unescape (car tokens)) (scan (cdr tokens)))]))
+  ;; (scan-tokens specs show-help tokens) => parse-result
+  ;; Options and positional words may come in any order. show-help is called, with no argument, at
+  ;; -h and --help.
+  (define (scan-tokens specs show-help tokens)
+    (let ([table (make-eq-hashtable)])
+      (let loop ([tokens tokens] [words '()])
+        (cond
+         [(null? tokens)
+          (make-parse-result table (reverse words) #f)]
+         [(string=? (car tokens) "--")
+          (make-parse-result table (append (reverse words) (cdr tokens)) #f)]
+         [(member (car tokens) '("-h" "--help"))
+          (show-help)
+          (make-parse-result table (reverse words) #t)]
+         [(option-like? (car tokens) specs)
+          (loop (parse-option specs table (car tokens) (cdr tokens)) words)]
+         [else
+          (loop (cdr tokens) (cons (unescape (car tokens)) words))]))))
 
-         ;; token is "-x", "--long" or "-x=text" / "--long=text"; returns the unconsumed tokens.
-         ;; After =, the text is exactly one argument, whatever it contains (getopt, argparse and click
-         ;; do the same). Following words are not consumed, so an option that takes a variable number of
-         ;; arguments can be stopped, and an option that needs two or more cannot use =.
-         (define (parse-option token rest)
-           (let* ([equals (index-of #\= token)]
-                  [name (if equals (substring token 0 equals) token)]
-                  [spec (find-spec-by-token specs name)])
-             (cond
-              [equals
-               (cond [(= 0 (option-ast-max spec))
-                      (fail "option does not take arguments" name)]
-                     [(> (option-ast-min spec) 1)
-                      (fail "too few arguments for option" name)])
-               (store! spec name (list (substring token (+ equals 1) (string-length token))))
-               rest]
-              [else
-               (let-values ([(items remaining) (take-arguments rest (option-ast-max spec))])
-                 (when (< (length items) (option-ast-min spec))
-                   (fail "too few arguments for option" name))
-                 (store! spec name items)
-                 remaining)])))
+  ;; token is "-x", "--long" or "-x=text" / "--long=text"; stores the option in the table and returns
+  ;; the tokens that it did not take.
+  ;; After =, the text is exactly one argument, whatever it contains (getopt, argparse and click do the
+  ;; same). Following words are not consumed, so an option that takes a variable number of arguments
+  ;; can be stopped, and an option that needs two or more cannot use =.
+  (define (parse-option specs table token rest)
+    (let* ([equals (index-of #\= token)]
+           [name (if equals (substring token 0 equals) token)]
+           [spec (find-spec-by-token specs name)])
+      (cond
+       [equals
+        (cond [(= 0 (option-ast-max spec))
+               (fail "option does not take arguments" name)]
+              [(> (option-ast-min spec) 1)
+               (fail "too few arguments for option" name)])
+        (store! table spec name (list (substring token (+ equals 1) (string-length token))))
+        rest]
+       [else
+        (let-values ([(items remaining) (take-arguments specs rest (option-ast-max spec))])
+          (when (< (length items) (option-ast-min spec))
+            (fail "too few arguments for option" name))
+          (store! table spec name items)
+          remaining)])))
 
-         ;; returns (values taken remaining), taking at most max tokens
-         (define (take-arguments tokens max)
-           (let loop ([tokens tokens] [count 0] [taken '()])
-             (if (and (< count max) (pair? tokens) (argument-token? (car tokens)))
-                 (loop (cdr tokens) (+ count 1) (cons (car tokens) taken))
-                 (values (reverse taken) tokens))))
+  ;; returns (values taken remaining), taking at most max tokens
+  (define (take-arguments specs tokens max)
+    (let loop ([tokens tokens] [count 0] [taken '()])
+      (if (and (< count max) (pair? tokens) (argument-token? (car tokens) specs))
+          (loop (cdr tokens) (+ count 1) (cons (car tokens) taken))
+          (values (reverse taken) tokens))))
 
-         (define (argument-token? token)
-           (not (or (string=? token "--") (option-like? token specs))))
+  (define (argument-token? token specs)
+    (not (or (string=? token "--") (option-like? token specs))))
 
-         (define (store! spec name items)
-           (hashtable-set! table spec (convert-items spec name items)))
+  (define (store! table spec name items)
+    (hashtable-set! table spec (convert-items spec name items)))
 
-         ;; the converter reports its own failure, it is given the name of the option for that
-         (define (convert-items spec name items)
-           (let ([convert (converter-convert (spec-converter spec))])
-             (map (lambda (item) (convert (unescape item) name)) items)))
+  ;; the converter reports its own failure, it is given the name of the option for that
+  (define (convert-items spec name items)
+    (let ([convert (converter-convert (spec-converter spec))])
+      (map (lambda (item) (convert (unescape item) name)) items)))
 
-         ;; The words that are not options are shared out to the positionals, in order. Each gets as
-         ;; many as its minimum, and the one that takes a variable number of words (there is at most
-         ;; one) also gets the words that are left over. Without a positional they are an error.
-         (define (take-positional-words! words)
-           (if (null? positionals)
-               (when (pair? words)
-                 (apply fail "unexpected positional argument" words))
-               (let* ([count (length words)]
-                      [minimum (sum (map positional-ast-min positionals))]
-                      [maximum (sum (map positional-ast-max positionals))])
-                 (check-enough-words positionals count)
-                 (when (> count maximum)
-                   (apply fail "too many positional arguments" (list-tail words maximum)))
-                 (let loop ([positionals positionals] [words words])
-                   (unless (null? positionals)
-                     (let* ([positional (car positionals)]
-                            [own (if (= (positional-ast-min positional) (positional-ast-max positional))
-                                     (positional-ast-min positional)
-                                     (+ (positional-ast-min positional) (- count minimum)))]
-                            [convert (converter-convert (spec-converter positional))])
-                       (hashtable-set! table positional
-                                       (map (lambda (word) (convert word (positional-ast-name positional)))
-                                            (list-head words own)))
-                       (loop (cdr positionals) (list-tail words own))))))))
+  ;; (distribute-words positionals words) => list of (positional . words), one per positional
+  ;; The words that are not options are shared out to the positionals, in order. Each gets as many
+  ;; as its minimum, and the one that takes a variable number of words (there is at most one) also
+  ;; gets the words that are left over. Without a positional they are an error.
+  ;;   cp-like: source (1 +), dest 1; words a b c  =>  ((source a b) (dest c))
+  (define (distribute-words positionals words)
+    (cond
+     [(null? positionals)
+      (when (pair? words)
+        (apply fail "unexpected positional argument" words))
+      '()]
+     [else
+      (let* ([count (length words)]
+             [minimum (sum (map positional-ast-min positionals))]
+             [maximum (sum (map positional-ast-max positionals))])
+        (check-enough-words positionals count)
+        (when (> count maximum)
+          (apply fail "too many positional arguments" (list-tail words maximum)))
+        (let loop ([positionals positionals] [words words] [shared '()])
+          (if (null? positionals)
+              (reverse shared)
+              (let* ([positional (car positionals)]
+                     [own (if (= (positional-ast-min positional) (positional-ast-max positional))
+                              (positional-ast-min positional)
+                              (+ (positional-ast-min positional) (- count minimum)))])
+                (loop (cdr positionals)
+                      (list-tail words own)
+                      (cons (cons positional (list-head words own)) shared))))))]))
 
-         (let ([words (scan args)])
-           (unless help-asked?
-             (check-required specs table)
-             (take-positional-words! words))
-           (make-accessor specs positionals table)))]))
+  ;; converts the words of each positional and puts them in the table
+  (define (store-positional-words! table shared)
+    (for-each
+     (lambda (pair)
+       (let ([convert (converter-convert (spec-converter (car pair)))]
+             [name (positional-ast-name (car pair))])
+         (hashtable-set! table (car pair) (map (lambda (word) (convert word name)) (cdr pair)))))
+     shared))
 
   ;; every positional needs its minimum, the first one that lacks words is the one to blame
   (define (check-enough-words positionals count)
@@ -167,8 +205,16 @@
               => (lambda (positional)
                    (value-of (positional-ast-min positional) (positional-ast-max positional)
                              (hashtable-ref table positional #f)))]
-             [else (fail "unknown option" key)]))
+             [else (fail "unknown option" key (unknown-name-hint specs positionals name))]))
           (fail "invalid option key" key))))
+
+  ;; the second irritant of "unknown option" from the accessor, what to do about it: a name that starts
+  ;; with a dash was written like on the command line, any other is shown with the names that exist
+  (define (unknown-name-hint specs positionals name)
+    (if (and (> (string-length name) 0) (char=? (string-ref name 0) #\-))
+        "names are read without the dashes"
+        (append (apply append (map option-lookup-names specs))
+                (map positional-ast-name positionals))))
 
   ;; what the program gets for the converted arguments `items` (#f when none were given):
   ;; #t or #f for a flag, the value for exactly one argument, a list otherwise

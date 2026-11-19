@@ -2073,7 +2073,7 @@
     (CHECK equal? (error-message (lambda () (scan '("-v=1")))) "option does not take arguments"))
 
   (define-test test-scan-tokens-an-unlimited-option-stops-at-an-option-or-the-double-dash
-    (let ([result (scan-tokens scan-specs void '("-e" "x" "y" "-v" "z" "--" "w"))])
+    (let ([result (scan-tokens scan-specs (lambda () #f) '("-e" "x" "y" "-v" "z" "--" "w"))])
       (CHECK equal? (hashtable-ref (parse-result-table result) (caddr scan-specs) #f) '("x" "y"))
       (CHECK equal? (parse-result-words result) '("z" "w"))))
 
@@ -2086,7 +2086,7 @@
       (hashtable-set! table (car specs) '("x"))
       (CHECK equal? (error-irritants (lambda () (check-required specs table))) '("-b"))
       (hashtable-set! table (cadr specs) '())
-      (CHECK equal? (check-required specs table) (if #f #f))))
+      (CHECK equal? (begin (check-required specs table) 'no-error) 'no-error)))
   ;; ========================================
   ;; the usage of a positional
   ;; ========================================

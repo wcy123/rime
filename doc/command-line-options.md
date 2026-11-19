@@ -431,8 +431,17 @@ Catch it with `guard`; the library never exits by itself except for `-h`.
 ```
 
 The accessor raises `unknown option` for names that were not defined (also a name with its dashes);
-the parser never does, a word that is not a defined option is an ordinary word,
-and `invalid option key` for anything that is not a string or a symbol.
+the parser never does, a word that is not a defined option is an ordinary word.
+The accessor raises `invalid option key` for anything that is not a string or a symbol. The first irritant of
+`unknown option` is the name as it was given, the second says what to do about it: for a name that
+starts with a dash, the text `names are read without the dashes`, and for any other name, the list of
+the names that exist (the options in the order they were defined, short name first, then the
+positionals).
+
+```
+(option "verbos")     ; unknown option, irritants: "verbos" ("v" "verbose" "o" "output" "name" "file")
+(option "--verbose")  ; unknown option, irritants: "--verbose" "names are read without the dashes"
+```
 
 # A complete example
 
