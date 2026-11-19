@@ -6,6 +6,7 @@
           (rime unit-test)
           (rime command-line-options)
           (rime command-line-options __ast)
+          (rime command-line-options __codegen)
           (rime command-line-options __runtime))
 
   (define (main)
@@ -2214,6 +2215,177 @@
                           "\n"
                           "Options:\n"
                           "  -h, --help  show this help message and exit\n")))
+  ;; ========================================
+  ;; option-spec and positional-spec, a record built by the names of its fields
+  ;; ========================================
+
+  (define spec-environment (environment '(rnrs (6)) '(rime command-line-options __ast)))
+
+  ;; #t when evaluating the form is a syntax violation
+  (define (spec-syntax-error? form)
+    (guard (e [(syntax-violation? e) #t]
+              [else #f])
+      (eval form spec-environment)
+      #f))
+
+  (define (option-fields o)
+    (list (option-ast-short o) (option-ast-long o) (option-ast-min o) (option-ast-max o)
+          (option-ast-converter o) (option-ast-description o) (option-ast-source o)
+          (option-ast-required o)))
+
+  (define-test test-option-spec-gives-every-field-its-default
+    (CHECK equal? (option-fields (option-spec)) '(#f #f 1 1 #f "" #f #f))
+    (CHECK equal? (option-fields (option-spec [short "-a"])) '("-a" #f 1 1 #f "" #f #f)))
+
+  (define-test test-option-spec-takes-every-field
+    (CHECK equal?
+           (option-fields (option-spec [short "-n"] [long "--count"] [min 0] [max 2] [converter 'conv]
+                                       [description "repeat"] [source 'src] [required #t]))
+           '("-n" "--count" 0 2 conv "repeat" src #t)))
+
+  (define-test test-option-spec-does-not-care-about-the-order-of-the-fields
+    (CHECK equal?
+           (option-fields (option-spec [required #t] [description "d"] [long "--x"] [short "-x"]))
+           (option-fields (option-spec [short "-x"] [long "--x"] [description "d"] [required #t])))
+    (CHECK equal?
+           (option-fields (option-spec [max 3] [min 2]))
+           (option-fields (make-option-ast #f #f 2 3 #f "" #f #f))))
+
+  (define-test test-option-spec-is-the-same-record-as-make-option-ast
+    (let ([a (option-spec [short "-n"] [long "--count"] [min 0] [max 2] [converter 'conv]
+                          [description "repeat"] [source 'src] [required #t])]
+          [b (make-option-ast "-n" "--count" 0 2 'conv "repeat" 'src #t)])
+      (CHECK equal? (option-fields a) (option-fields b))
+      (CHECK eq? (option-ast? a) #t)))
+
+  (define-test test-option-spec-evaluates-its-values
+    (let ([n 3])
+      (CHECK equal? (option-ast-max (option-spec [max (+ n 1)])) 4)))
+
+  (define-test test-option-spec-syntax-errors
+    (CHECK eq? (spec-syntax-error? '(option-spec [colour 1])) #t)
+    (CHECK eq? (spec-syntax-error? '(option-spec [short "-a"] [short "-b"])) #t)
+    (CHECK eq? (spec-syntax-error? '(option-spec short)) #t)
+    (CHECK eq? (spec-syntax-error? '(option-spec [short])) #t)
+    (CHECK eq? (spec-syntax-error? '(option-spec [short "-a" "-b"])) #t)
+    (CHECK eq? (spec-syntax-error? '(option-spec [short "-a"])) #f))
+
+  (define-test test-positional-spec-gives-every-field-its-default
+    (let ([p (positional-spec [name "file"])])
+      (CHECK equal? (list (positional-ast-name p) (positional-ast-min p) (positional-ast-max p)
+                          (positional-ast-converter p) (positional-ast-description p)
+                          (positional-ast-source p))
+             '("file" 1 1 #f "" #f))))
+
+  (define-test test-positional-spec-takes-every-field-in-any-order
+    (let ([p (positional-spec [source 'src] [description "d"] [converter 'conv]
+                              [max unlimited] [min 0] [name "file"])])
+      (CHECK equal? (list (positional-ast-name p) (positional-ast-min p) (positional-ast-max p)
+                          (positional-ast-converter p) (positional-ast-description p)
+                          (positional-ast-source p))
+             (list "file" 0 unlimited 'conv "d" 'src))
+      (CHECK eq? (positional-ast? p) #t)))
+
+  (define-test test-positional-spec-needs-a-name
+    (CHECK eq? (spec-syntax-error? '(positional-spec)) #t)
+    (CHECK eq? (spec-syntax-error? '(positional-spec [min 1])) #t)
+    (CHECK eq? (spec-syntax-error? '(positional-spec [name "a"] [colour 1])) #t)
+    (CHECK eq? (spec-syntax-error? '(positional-spec [name "a"] [name "b"])) #t)
+    (CHECK eq? (spec-syntax-error? '(positional-spec [name "a"])) #f))
+
+  ;; the generated code of a definition lists only the fields that are not the default
+  (define (generated-definition options positionals)
+    (syntax->datum (generate-definition #'p options positionals)))
+
+  (define (definition-around specs positionals)
+    `(define p
+       (let ([specs (list ,@specs)])
+         (lambda (arguments)
+           (parse-command-line specs arguments default-on-help (list ,@positionals))))))
+
+  (define-test test-generated-code-mentions-only-the-fields-that-are-not-the-default
+    (CHECK equal?
+           (generated-definition (list (make-option-ast "-a" #f 1 1 #f "" #f #f)) '())
+           (definition-around '((option-spec (short "-a"))) '()))
+    (CHECK equal?
+           (generated-definition (list (make-option-ast #f "--all" 0 0 #f "" #f #f)) '())
+           (definition-around '((option-spec (long "--all") (min 0) (max 0))) '()))
+    (CHECK equal?
+           (generated-definition (list (make-option-ast "-r" #f 1 1 #f "" #f #t)) '())
+           (definition-around '((option-spec (short "-r") (required #t))) '())))
+
+  (define-test test-generated-code-of-a-full-option
+    (CHECK equal?
+           (generated-definition
+            (list (make-option-ast "-n" "--count" 0 unlimited #'(builtin-converter 'int) "repeat" #f #t))
+            '())
+           (definition-around
+             `((option-spec (short "-n") (long "--count") (min 0) (max ,unlimited)
+                            (converter (builtin-converter 'int)) (description "repeat") (required #t)))
+             '())))
+
+  (define-test test-generated-code-of-a-positional
+    (CHECK equal?
+           (generated-definition '() (list (make-positional-ast "file" 1 1 #f "" #f)))
+           (definition-around '() '((positional-spec (name "file")))))
+    (CHECK equal?
+           (generated-definition '() (list (make-positional-ast "f" 0 unlimited #'(builtin-converter 'int) "files" #f)))
+           (definition-around
+             '()
+             `((positional-spec (name "f") (min 0) (max ,unlimited)
+                                (converter (builtin-converter 'int)) (description "files"))))))
+
+  (define-test test-generated-code-keeps-the-order-of-the-options
+    (CHECK equal?
+           (generated-definition (list (make-option-ast "-b" #f 1 1 #f "" #f #f)
+                                       (make-option-ast "-a" #f 1 1 #f "" #f #f))
+                                 '())
+           (definition-around '((option-spec (short "-b")) (option-spec (short "-a"))) '())))
+
+  ;; the setters of the records, one for each field: set a field that is still unbound, and call
+  ;; on-duplicate for one that was given already
+  (define (check-setters make-unbound field-setters)
+    (for-each
+     (lambda (entry)
+       (let ([setter (car entry)] [getter (cadr entry)] [first (caddr entry)] [second (cadddr entry)]
+             [calls 0])
+         (let ([record (make-unbound)])
+           (setter record first (lambda () (set! calls (+ calls 1))))
+           (CHECK equal? (getter record) first)
+           (CHECK eqv? calls 0)
+           (setter record second (lambda () (set! calls (+ calls 1))))
+           (CHECK equal? (getter record) first)
+           (CHECK eqv? calls 1))))
+     field-setters))
+
+  (define-test test-option-ast-setters-set-a-field-once
+    (check-setters
+     (lambda () (make-unbound-option-ast 'src))
+     (list (list option-ast-short-set-if-not-given-yet! option-ast-short "-a" "-b")
+           (list option-ast-long-set-if-not-given-yet! option-ast-long "--a" "--b")
+           (list option-ast-min-set-if-not-given-yet! option-ast-min 1 2)
+           (list option-ast-max-set-if-not-given-yet! option-ast-max 3 4)
+           (list option-ast-converter-set-if-not-given-yet! option-ast-converter 'e1 'e2)
+           (list option-ast-description-set-if-not-given-yet! option-ast-description "d1" "d2")
+           (list option-ast-required-set-if-not-given-yet! option-ast-required #t #f))))
+
+  (define-test test-positional-ast-setters-set-a-field-once
+    (check-setters
+     (lambda () (make-unbound-positional-ast 'src))
+     (list (list positional-ast-name-set-if-not-given-yet! positional-ast-name "a" "b")
+           (list positional-ast-min-set-if-not-given-yet! positional-ast-min 1 2)
+           (list positional-ast-max-set-if-not-given-yet! positional-ast-max 3 4)
+           (list positional-ast-converter-set-if-not-given-yet! positional-ast-converter 'e1 'e2)
+           (list positional-ast-description-set-if-not-given-yet! positional-ast-description "d1" "d2"))))
+
+  (define-test test-a-setter-counts-false-as-given
+    (let ([o (make-unbound-option-ast 'src)]
+          [calls 0])
+      (option-ast-short-set-if-not-given-yet! o #f (lambda () (set! calls (+ calls 1))))
+      (option-ast-short-set-if-not-given-yet! o "-a" (lambda () (set! calls (+ calls 1))))
+      (CHECK eqv? calls 1)
+      (CHECK equal? (option-ast-short o) #f)))
+
   ;; ========================================
   ;; definition errors: which rule is broken, and where
   ;; ========================================
