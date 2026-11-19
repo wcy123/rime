@@ -360,9 +360,74 @@
     (CHECK equal? (error-message (lambda () (parse '("-vq"))))
            "unknown option"))
 
-  (define-test test-error-negative-number-needs-escape
-    (CHECK equal? (error-message (lambda () (parse '("-n" "-5"))))
-           "too few arguments for option"))
+  ;; ========================================
+  ;; negative numbers are values, not options
+  ;; ========================================
+
+  (define-test test-negative-number-is-an-argument
+    (CHECK eqv? ((parse '("-n" "-5")) "n") -5)
+    (CHECK eqv? ((parse '("--count" "-5")) "count") -5)
+    (CHECK eqv? ((parse '("-n" "-0")) "n") 0))
+
+  (define-test test-negative-float-is-an-argument
+    (CHECK eqv? ((parse '("-x" "-1.5")) "x") -1.5)
+    (CHECK eqv? ((parse '("-x" "-.5")) "x") -0.5)
+    (CHECK eqv? ((parse '("-x" "-1e3")) "x") -1000.0)
+    (CHECK eqv? ((parse '("-x" "-2.5E-3")) "x") -0.0025)
+    (CHECK eqv? ((parse '("-x" "-2e+2")) "x") -200.0))
+
+  (define-test test-negative-numbers-for-options-with-several-arguments
+    (CHECK equal? ((parse '("-p" "-1" "-2")) "p") '(-1 -2))
+    (CHECK equal? ((parse '("-f" "-1" "-2" "-3")) "f") '("-1" "-2" "-3"))
+    (CHECK equal? ((parse '("-r" "-1" "-2")) "r") '(-1 -2)))
+
+  (define-test test-negative-number-ends-at-the-next-option
+    (let ([option (parse '("-f" "-1" "-v" "-2"))])
+      (CHECK equal? (option "f") '("-1"))
+      (CHECK equal? (positional option 0) "-2")))
+
+  (define-test test-negative-number-as-a-positional-word
+    (CHECK equal? ((parse '("-5")) "args") '("-5"))
+    (CHECK equal? ((parse '("a" "-5" "b")) "args") '("a" "-5" "b"))
+    (CHECK equal? ((parse '("-v" "-5")) "args") '("-5")))
+
+  (define-test test-negative-number-after-double-dash-is-a-word
+    (CHECK equal? ((parse '("--" "-5")) "args") '("-5")))
+
+  (define-test test-negative-integer-choice-without-the-escape
+    (CHECK eqv? ((with-choices '("--delta" "-1")) "delta") -1))
+
+  (define-test test-negative-number-with-the-escape-still-works
+    (CHECK eqv? ((parse '("-n" "\\-5")) "n") -5)
+    (CHECK equal? ((parse '("\\-5")) "args") '("-5")))
+
+  (define-test test-words-that-are-not-numbers-are-still-options
+    (for-each
+     (lambda (word)
+       (CHECK equal? (list word (error-message (lambda () (parse (list word)))))
+              (list word "unknown option")))
+     '("-5a" "-0x10" "-1/2" "-inf" "-e5" "-1e" "-1." "-." "-1.2.3" "-+5" "-5-" "--5" "-1e+" "-i")))
+
+  (define-test test-a-word-like-a-number-but-not-a-number-can-be-escaped
+    (CHECK equal? ((parse '("\\-5a")) "args") '("-5a"))
+    (CHECK equal? ((parse '("-s" "\\-0x10")) "s") "-0x10"))
+
+  (define-command-line-options parse-digit
+    [:short "-1" :arity 0 :description "one"]
+    [:short "-n" :type int]
+    [:positional "rest" :arity (0 +)])
+
+  (define-test test-an-option-named-like-a-number-wins
+    (let ([option (parse-digit '("-1" "x"))])
+      (CHECK eq? (not (memq (option "1") '(#f absent))) #t)
+      (CHECK equal? (option "rest") '("x")))
+    (CHECK equal? (error-message (lambda () (parse-digit '("-n" "-1")))) "too few arguments for option"))
+
+  (define-test test-another-number-is-still-a-value-when-an-option-is-named-like-a-number
+    (let ([option (parse-digit '("-n" "-2" "-3"))])
+      (CHECK eqv? (option "n") -2)
+      (CHECK equal? (option "rest") '("-3")))
+    (CHECK equal? ((parse-digit '("-2")) "rest") '("-2")))
 
   (define-test test-error-too-few-none-given
     (CHECK equal? (error-message (lambda () (parse '("-n"))))
@@ -851,7 +916,7 @@
     (CHECK equal? ((with-choices '("--mixed" "auto")) "mixed") "auto")
     (CHECK eqv? ((with-choices '("--mixed" "2")) "mixed") 2))
 
-  (define-test test-negative-integer-choice-needs-the-escape
+  (define-test test-negative-integer-choice-with-the-escape
     (CHECK eqv? ((with-choices '("--delta" "\\-1")) "delta") -1)
     (CHECK eqv? ((with-choices '("--delta" "0")) "delta") 0))
 
