@@ -500,7 +500,7 @@
 
   (define-test test-an-option-named-like-a-number-wins
     (let ([option (parse-digit '("-1" "x"))])
-      (CHECK eq? (not (memq (option "1") '(#f absent))) #t)
+      (CHECK eq? (option "1") #t)
       (CHECK equal? (option "rest") '("x")))
     (CHECK equal? (error-message (lambda () (parse-digit '("-n" "-1")))) "too few arguments for option"))
 
