@@ -17,6 +17,7 @@
           describe-problem
           format-usage
           program-name
+          program-name-of
           default-on-help
           builtin-converters
           builtin-converter
@@ -298,11 +299,13 @@
             [(member name (option-lookup-names (car specs))) (car specs)]
             [else (loop (cdr specs))])))
 
-  (define (program-name)
-    (let ([command-line (command-line)])
-      (if (and (pair? command-line) (string? (car command-line)))
-          (car command-line)
-          "program")))
+  (define (program-name) (program-name-of (command-line)))
+
+  ;; (program-name-of command-line) => the first element of a (command-line), or "program"
+  (define (program-name-of command-line)
+    (if (and (pair? command-line) (string? (car command-line)))
+        (car command-line)
+        "program"))
 
   ;; ========================================
   ;; usage
