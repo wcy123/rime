@@ -475,20 +475,14 @@
   (define (procedure->converter procedure)
     (make-procedure-converter "<value>" procedure))
 
-  ;; a converter for a list of choices, strings and exact integers; an integer is chosen by its
-  ;; usual text and the value is the choice itself
+  ;; a converter for a list of choices, which are strings; the value is the argument
   (define (make-choice-converter choices)
     (make-converter
-     (string-append "{" (join (map choice->text choices) ",") "}")
+     (string-append "{" (join choices ",") "}")
      (lambda (text name)
-       (let loop ([rest choices])
-         (cond [(null? rest)
-                (fail "argument must be one of the choices" name text choices)]
-               [(string=? (choice->text (car rest)) text) (car rest)]
-               [else (loop (cdr rest))])))))
-
-  (define (choice->text choice)
-    (if (string? choice) choice (number->string choice)))
+       (if (member text choices)
+           text
+           (fail "argument must be one of the choices" name text choices)))))
 
   (define (convert-string s) s)
 
@@ -581,15 +575,15 @@
           w
           (write->string w)))
     (define (words ws) (join (map word ws) " "))
-    (define (choice-text c) (if (string? c) c (number->string c)))
     (define (all-strings? ds) (for-all string? ds))
     (cond
      [(and (is? "invalid argument value") (= 2 (length details)) (all-strings? details))
       (string-append "invalid argument " (write->string (cadr details)) " for " (car details))]
      [(and (is? "argument must be one of the choices") (= 3 (length details))
-           (string? (car details)) (string? (cadr details)) (list? (caddr details)))
+           (string? (car details)) (string? (cadr details))
+           (list? (caddr details)) (all-strings? (caddr details)))
       (string-append (write->string (cadr details)) " is not one of "
-                     (join (map choice-text (caddr details)) ", ")
+                     (join (caddr details) ", ")
                      " (for " (car details) ")")]
      [(and (is? "too few arguments for option") (= 1 (length details)) (all-strings? details))
       (string-append "too few arguments for " (car details))]

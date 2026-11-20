@@ -232,38 +232,28 @@
         (with-syntax ([procedure form])
           #'(procedure->converter procedure))))
 
-  ;; the :choices value, a list of literals -> a converter expression
+  ;; the :choices value, a list of strings -> a converter expression
   ;;   ("json" "text") => #'(make-choice-converter '("json" "text"))
-  ;; each choice is a string or an exact integer, there is at least one, and no two of them have the
-  ;; same text (the argument 1 would match both "1" and 1)
+  ;; each choice is a string, there is at least one, and no two of them are the same
   (define (read-choices form)
     (with-syntax ([choices (datum->syntax #'here (read-choice-list form))])
       #'(make-choice-converter 'choices)))
 
-  ;; the datums of the literals of the list `whole`, checked; `datums` are those before, the latest first
+  ;; the strings of the list `whole`, checked; `choices` are those before, the latest first
   (define (read-choice-list whole)
-    (let loop ([rest whole] [datums '()])
+    (let loop ([rest whole] [choices '()])
       (syntax-case rest ()
-        [() (if (null? datums)
+        [() (if (null? choices)
                 (violation ":choices needs at least one choice" whole)
-                (reverse datums))]
+                (reverse choices))]
         [(choice . more)
-         (let ([datum (read-choice #'choice)])
-           (when (member (choice-text datum) (map choice-text datums))
+         (let ([text (syntax->datum #'choice)])
+           (unless (string? text)
+             (violation "a choice must be a string" #'choice))
+           (when (member text choices)
              (violation "duplicate choice" #'choice))
-           (loop #'more (cons datum datums)))]
-        [_ (violation ":choices must be a list of strings or integers" whole)])))
-
-  ;; a choice is a string or an exact integer
-  (define (read-choice form)
-    (let ([datum (syntax->datum form)])
-      (if (or (string? datum) (and (integer? datum) (exact? datum)))
-          datum
-          (violation "a choice must be a string or an integer" form))))
-
-  ;; the text an argument has to have to match the choice
-  (define (choice-text datum)
-    (if (string? datum) datum (number->string datum)))
+           (loop #'more (cons text choices)))]
+        [_ (violation ":choices must be a list of strings" whole)])))
 
   (define (read-description form)
     (if (string? (syntax->datum form))
