@@ -240,19 +240,19 @@
     (with-syntax ([choices (datum->syntax #'here (read-choice-list form))])
       #'(make-choice-converter 'choices)))
 
-  ;; the datums of the literals of the list `whole`, checked; `texts` are the texts of those before
+  ;; the datums of the literals of the list `whole`, checked; `texts` and `datums` are those of the
+  ;; literals before, `datums` the latest first
   (define (read-choice-list whole)
-    (let loop ([rest whole] [texts '()])
+    (let loop ([rest whole] [texts '()] [datums '()])
       (syntax-case rest ()
-        [() (if (null? texts)
+        [() (if (null? datums)
                 (violation ":choices needs at least one choice" whole)
-                '())]
+                (reverse datums))]
         [(choice . more)
          (let ([text (choice-text #'choice)])
            (when (member text texts)
              (violation "duplicate choice" #'choice))
-           (cons (syntax->datum #'choice)
-                 (loop #'more (cons text texts))))]
+           (loop #'more (cons text texts) (cons (syntax->datum #'choice) datums)))]
         [_ (violation ":choices must be a list of strings or integers" whole)])))
 
   ;; the text an argument has to have to match the choice
