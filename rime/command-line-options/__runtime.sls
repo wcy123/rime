@@ -301,9 +301,10 @@
 
   (define (program-name) (program-name-of (command-line)))
 
-  ;; (program-name-of command-line) => the first element of a (command-line), or "program"
+  ;; (program-name-of command-line) => the first element of a (command-line), or "program" when
+  ;; there is none: (command-line) is ("") when there is no script, in a REPL or with --eval
   (define (program-name-of command-line)
-    (if (and (pair? command-line) (string? (car command-line)))
+    (if (and (pair? command-line) (string? (car command-line)) (not (string=? (car command-line) "")))
         (car command-line)
         "program"))
 
