@@ -237,22 +237,23 @@
   ;; each choice is a string or an exact integer, there is at least one, and no two of them have the
   ;; same text (the argument 1 would match both "1" and 1)
   (define (read-choices form)
-    (with-syntax ([choices (datum->syntax #'here (read-choice-list form form '()))])
+    (with-syntax ([choices (datum->syntax #'here (read-choice-list form))])
       #'(make-choice-converter 'choices)))
 
-  ;; the datums of the literals in `rest`, checked; `texts` are the texts of those before
-  (define (read-choice-list rest whole texts)
-    (syntax-case rest ()
-      [() (if (null? texts)
-              (violation ":choices needs at least one choice" whole)
-              '())]
-      [(choice . more)
-       (let ([text (choice-text #'choice)])
-         (when (member text texts)
-           (violation "duplicate choice" #'choice))
-         (cons (syntax->datum #'choice)
-               (read-choice-list #'more whole (cons text texts))))]
-      [_ (violation ":choices must be a list of strings or integers" whole)]))
+  ;; the datums of the literals of the list `whole`, checked; `texts` are the texts of those before
+  (define (read-choice-list whole)
+    (let loop ([rest whole] [texts '()])
+      (syntax-case rest ()
+        [() (if (null? texts)
+                (violation ":choices needs at least one choice" whole)
+                '())]
+        [(choice . more)
+         (let ([text (choice-text #'choice)])
+           (when (member text texts)
+             (violation "duplicate choice" #'choice))
+           (cons (syntax->datum #'choice)
+                 (loop #'more (cons text texts))))]
+        [_ (violation ":choices must be a list of strings or integers" whole)])))
 
   ;; the text an argument has to have to match the choice
   (define (choice-text form)
