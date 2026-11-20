@@ -366,13 +366,13 @@
 
   (define-command-line-options parse-numbers
     [:short "-n" :long "--num" :arity (1 +) :type int]
-    [:long "--level" :arity (1 +) :choices (1 2 4)]
+    [:long "--level" :arity (1 +) :choices ("1" "2" "4")]
     [:positional "rest" :arity (0 +)])
 
   (define-test test-every-repeated-value-is-converted-and-checked
     (CHECK equal? ((parse-numbers '("-n" "1" "-n" "2" "3")) "num") '(1 2 3))
     (CHECK equal? (error-message (lambda () (parse-numbers '("-n" "1" "-n" "x")))) "invalid argument value")
-    (CHECK equal? ((parse-numbers '("--level" "1" "--level" "4")) "level") '(1 4))
+    (CHECK equal? ((parse-numbers '("--level" "1" "--level" "4")) "level") '("1" "4"))
     (CHECK equal? (error-message (lambda () (parse-numbers '("--level" "1" "--level" "3"))))
            "argument must be one of the choices"))
 
@@ -560,8 +560,8 @@
   (define-test test-negative-number-after-double-dash-is-a-word
     (CHECK equal? ((parse '("--" "-5")) "args") '("-5")))
 
-  (define-test test-negative-integer-choice-without-the-escape
-    (CHECK eqv? ((with-choices '("--delta" "-1")) "delta") -1))
+  (define-test test-negative-number-choice-without-the-escape
+    (CHECK equal? ((with-choices '("--delta" "-1")) "delta") "-1"))
 
   (define-test test-negative-number-with-the-escape-still-works
     (CHECK eqv? ((parse '("-n" "\\-5")) "n") -5)
@@ -763,7 +763,7 @@
      (list "argument must be one of the choices" '("--format" "xml" ("json" "text" "yaml"))
            "\"xml\" is not one of json, text, yaml (for --format)"
            (lambda () (with-choices '("--format" "xml"))))
-     (list "argument must be one of the choices" '("--level" "3" (1 2 4))
+     (list "argument must be one of the choices" '("--level" "3" ("1" "2" "4"))
            "\"3\" is not one of 1, 2, 4 (for --level)"
            (lambda () (with-choices '("--level" "3"))))
      (list "too few arguments for option" '("-n")
@@ -1304,10 +1304,10 @@
 
   (define-command-line-options with-choices
     [:short "-f" :long "--format" :choices ("json" "text" "yaml") :description "output format"]
-    [:long "--level" :choices (1 2 4) :description "verbosity level"]
+    [:long "--level" :choices ("1" "2" "4") :description "verbosity level"]
     [:short "-m" :long "--mode" :arity (1 +) :choices ("a" "b" "c")]
-    [:long "--mixed" :choices ("auto" 1 2)]
-    [:long "--delta" :choices (-1 0 1)]
+    [:long "--mixed" :choices ("auto" "1" "2")]
+    [:long "--delta" :choices ("-1" "0" "1")]
     [:short "-v" :arity 0 :description "a flag"])
 
   (define (error-irritants thunk)
@@ -1326,18 +1326,18 @@
     (CHECK equal? ((with-choices '("--format=json")) "f") "json")
     (CHECK equal? ((with-choices '("-f=text")) "f") "text"))
 
-  (define-test test-integer-choices-give-integers
+  (define-test test-choices-that-look-like-numbers-give-strings
     (let ([option (with-choices '("--level" "4"))])
-      (CHECK eqv? (option "level") 4))
-    (CHECK eqv? ((with-choices '("--level=1")) "level") 1))
+      (CHECK equal? (option "level") "4"))
+    (CHECK equal? ((with-choices '("--level=1")) "level") "1"))
 
   (define-test test-mixed-choices
     (CHECK equal? ((with-choices '("--mixed" "auto")) "mixed") "auto")
-    (CHECK eqv? ((with-choices '("--mixed" "2")) "mixed") 2))
+    (CHECK equal? ((with-choices '("--mixed" "2")) "mixed") "2"))
 
-  (define-test test-negative-integer-choice-with-the-escape
-    (CHECK eqv? ((with-choices '("--delta" "\\-1")) "delta") -1)
-    (CHECK eqv? ((with-choices '("--delta" "0")) "delta") 0))
+  (define-test test-negative-number-choice-with-the-escape
+    (CHECK equal? ((with-choices '("--delta" "\\-1")) "delta") "-1")
+    (CHECK equal? ((with-choices '("--delta" "0")) "delta") "0"))
 
   (define-test test-every-argument-is-checked
     (CHECK equal? ((with-choices '("-m" "a" "c" "b")) "mode") '("a" "c" "b"))
@@ -1363,7 +1363,7 @@
 
   (define-test test-wrong-integer-choice
     (CHECK equal? (error-irritants (lambda () (with-choices '("--level" "3"))))
-           '("--level" "3" (1 2 4)))
+           '("--level" "3" ("1" "2" "4")))
     (CHECK equal? (error-message (lambda () (with-choices '("--level" "abc"))))
            "argument must be one of the choices"))
 
@@ -1388,7 +1388,7 @@
                                          (make-choice-converter '("json" "text" "yaml"))
                                          "output format" #f #f #f)
                         (make-option-ast #f "--level" 1 1
-                                         (make-choice-converter '(1 2 4)) "verbosity level" #f #f #f)
+                                         (make-choice-converter '("1" "2" "4")) "verbosity level" #f #f #f)
                         (make-option-ast "-m" "--mode" 1 unlimited
                                          (make-choice-converter '("a" "b" "c")) "mode" #f #f #f)
                         (make-option-ast "-n" "--num" 0 2
@@ -1437,12 +1437,12 @@
   (define-test test-choices-and-type-together-is-a-syntax-error
     (CHECK eq? (syntax-error?
                 '(let ()
-                   (define-command-line-options p [:short "-a" :type int :choices (1 2)])
+                   (define-command-line-options p [:short "-a" :type int :choices ("1" "2")])
                    p))
            #t)
     (CHECK eq? (syntax-error?
                 '(let ()
-                   (define-command-line-options p [:short "-a" :choices (1 2) :type int])
+                   (define-command-line-options p [:short "-a" :choices ("1" "2") :type int])
                    p))
            #t))
 
@@ -1824,11 +1824,11 @@
            '("--count" "zz!")))
 
   (define-test test-choice-converter-reports-its-own-failure
-    (let ([convert (converter-convert (make-choice-converter '("a" 2)))])
+    (let ([convert (converter-convert (make-choice-converter '("a" "2")))])
       (CHECK equal? (convert "a" "-m") "a")
-      (CHECK eqv? (convert "2" "-m") 2)
+      (CHECK equal? (convert "2" "-m") "2")
       (CHECK equal? (error-message (lambda () (convert "b" "-m"))) "argument must be one of the choices")
-      (CHECK equal? (error-irritants (lambda () (convert "b" "-m"))) '("-m" "b" ("a" 2)))))
+      (CHECK equal? (error-irritants (lambda () (convert "b" "-m"))) '("-m" "b" ("a" "2")))))
 
   (define-test test-procedure-converter-turns-any-failure-into-an-invalid-argument
     (let ([convert (converter-convert (procedure->converter (lambda (s) (raise 'bad))))])
@@ -1842,7 +1842,7 @@
                        '(string int float bool))
            '("<string>" "<int>" "<float>" "<bool>"))
     (CHECK equal? (converter-label (procedure->converter string-upcase)) "<value>")
-    (CHECK equal? (converter-label (make-choice-converter '("a" 2))) "{a,2}"))
+    (CHECK equal? (converter-label (make-choice-converter '("a" "2"))) "{a,2}"))
 
   ;; a converter that nothing in the runtime knows about: it brings its label, and it reports
   ;; its own failure, given the text and the name of the option
@@ -3106,14 +3106,15 @@
        ("the converter is given twice" [:short "-a" :choices ("x") :type int])
        ("the converter is given twice" [:short "-a" :type int :type float])
        (":choices needs at least one choice" [:short "-a" :choices ()])
-       (":choices must be a list of strings or integers" [:short "-a" :choices "x"])
-       (":choices must be a list of strings or integers" [:short "-a" :choices x])
-       ("a choice must be a string or an integer" [:short "-a" :choices (x)])
-       ("a choice must be a string or an integer" [:short "-a" :choices (1.5)])
-       ("a choice must be a string or an integer" [:short "-a" :choices (1.0)])
+       (":choices must be a list of strings" [:short "-a" :choices "x"])
+       (":choices must be a list of strings" [:short "-a" :choices x])
+       ("a choice must be a string" [:short "-a" :choices (x)])
+       ("a choice must be a string" [:short "-a" :choices (1)])
+       ("a choice must be a string" [:short "-a" :choices (1 2 4)])
+       ("a choice must be a string" [:short "-a" :choices ("a" 1)])
+       ("a choice must be a string" [:short "-a" :choices (1.5)])
        ("duplicate choice" [:short "-a" :choices ("x" "x")])
-       ("duplicate choice" [:short "-a" :choices (1 "1")])
-       ("duplicate choice" [:short "-a" :choices ("1" 1)])
+       ("duplicate choice" [:short "-a" :choices ("1" "1")])
        (":description must be a string" [:short "-a" :description 42])
        (":description must be a string" [:short "-a" :description x])
        (#f [:short "-a" :type int])
@@ -3123,7 +3124,7 @@
        (#f [:short "-a" :type string-upcase])
        (#f [:short "-a" :type (lambda (s) s)])
        (#f [:short "-a" :choices ("x" "y")])
-       (#f [:short "-a" :choices (1 2 "a")])
+       (#f [:short "-a" :choices ("1" "2" "a")])
        (#f [:short "-a" :arity (1 +) :choices ("x")])
        (#f [:short "-a" :description ""]))))
 
