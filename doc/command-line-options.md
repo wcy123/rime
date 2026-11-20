@@ -129,16 +129,18 @@ so it takes the place of `:type`: giving both is a syntax error, and so is givin
 ```scheme
 (define-command-line-options parse
   [:short "-f" :long "--format" :choices ("json" "text" "yaml") :description "output format"]
-  [:long "--level" :choices (1 2 4) :description "verbosity level"]
+  [:long "--level" :choices ("1" "2" "4") :description "verbosity level"]
   [:short "-m" :long "--mode" :arity (1 +) :choices ("a" "b" "c") :description "modes"])
 ```
 
-* A choice is a string or an exact integer, and there is at least one. The value you get is the choice
-  itself: `"yaml"`, or the integer `4` (no `:type int` needed). Strings and integers can be mixed.
-* An argument has to match exactly, with the same case. An integer matches its usual text, so `4`
-  matches `"4"` but not `"04"`; a negative one is written as it is, `--delta -1` (see
+* A choice is a string, and there is at least one. The value you get is the argument as it was typed, a
+  string, also when the choices look like numbers: `--level 4` gives `"4"`. A program that wants a
+  number calls `(string->number (option "level"))`, which cannot fail after the check. A choice that is
+  not a string is a syntax error.
+* An argument has to match exactly, with the same case: `04` is not `"4"`. A choice that starts with a dash,
+  like `"-1"`, is written as it is, `--delta -1` (see
   [Words that start with `-`](#words-that-start-with--)).
-* Two choices with the same text are an error (`"1"` and `1`), since the second could never be chosen.
+* Two choices that are the same are an error, `("a" "a")`, since the second could never be chosen.
 * Every argument of an option with several arguments is checked, `-m a c`.
 * A wrong value raises `argument must be one of the choices` (see [Errors](#errors)).
 * The usage shows the choices in place of the type:
@@ -154,7 +156,7 @@ Options:
   -h, --help                     show this help message and exit
 
 $ prog -f yaml --level 4 -m a c
-("yaml" 4 ("a" "c"))
+("yaml" "4" ("a" "c"))
 
 $ prog --format xml
 Exception in opt-parser: argument must be one of the choices with irritants ("--format" "xml" ("json" "text" "yaml"))
