@@ -134,11 +134,13 @@ so it takes the place of `:type`: giving both is a syntax error, and so is givin
 ```
 
 * A choice is a string or an exact integer, and there is at least one. The value you get is the choice
-  itself: `"yaml"`, or the integer `4` (no `:type int` needed). Strings and integers can be mixed.
+  itself: `"yaml"`, or the integer `4` (no `:type int` needed). The choices of one option are all strings
+  or all integers, so the value always has the same type: a list that mixes them, `(1 "2")`, is a syntax
+  error.
 * An argument has to match exactly, with the same case. An integer matches its usual text, so `4`
   matches `"4"` but not `"04"`; a negative one is written as it is, `--delta -1` (see
   [Words that start with `-`](#words-that-start-with--)).
-* Two choices with the same text are an error (`"1"` and `1`), since the second could never be chosen.
+* Two choices that are the same are an error, `("a" "a")`, since the second could never be chosen.
 * Every argument of an option with several arguments is checked, `-m a c`.
 * A wrong value raises `argument must be one of the choices` (see [Errors](#errors)).
 * The usage shows the choices in place of the type:

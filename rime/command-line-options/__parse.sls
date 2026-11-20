@@ -234,36 +234,41 @@
 
   ;; the :choices value, a list of literals -> a converter expression
   ;;   ("json" "text") => #'(make-choice-converter '("json" "text"))
-  ;; each choice is a string or an exact integer, there is at least one, and no two of them have the
-  ;; same text (the argument 1 would match both "1" and 1)
+  ;; there is at least one choice, they are all strings or all integers, and no two of them are the same
   (define (read-choices form)
     (with-syntax ([choices (datum->syntax #'here (read-choice-list form))])
       #'(make-choice-converter 'choices)))
 
-  ;; the datums of the literals of the list `whole`, checked; `datums` are those before, the latest first
+  ;; the datums of the list `whole`, checked
   (define (read-choice-list whole)
-    (let loop ([rest whole] [datums '()])
+    (syntax-case whole ()
+      [() (violation ":choices needs at least one choice" whole)]
+      [(choice0 choice1 ...) (for-all string? (syntax->datum whole))
+       (read-distinct whole)]
+      [(choice0 choice1 ...) (for-all integer-choice? (syntax->datum whole))
+       (read-distinct whole)]
+      [(choice0 choice1 ...) (for-all choice? (syntax->datum whole))
+       (violation ":choices must be all strings or all integers" whole)]
+      [(choice0 choice1 ...)
+       (violation "a choice must be a string or an integer" whole)]
+      [_ (violation ":choices must be a list of strings or integers" whole)]))
+
+  (define (integer-choice? datum)
+    (and (integer? datum) (exact? datum)))
+
+  (define (choice? datum)
+    (or (string? datum) (integer-choice? datum)))
+
+  ;; the datums of the list `whole`; `seen` are those before, the latest first
+  (define (read-distinct whole)
+    (let loop ([rest whole] [seen '()])
       (syntax-case rest ()
-        [() (if (null? datums)
-                (violation ":choices needs at least one choice" whole)
-                (reverse datums))]
+        [() (reverse seen)]
         [(choice . more)
-         (let ([datum (read-choice #'choice)])
-           (when (member (choice-text datum) (map choice-text datums))
+         (let ([datum (syntax->datum #'choice)])
+           (when (member datum seen)
              (violation "duplicate choice" #'choice))
-           (loop #'more (cons datum datums)))]
-        [_ (violation ":choices must be a list of strings or integers" whole)])))
-
-  ;; a choice is a string or an exact integer
-  (define (read-choice form)
-    (let ([datum (syntax->datum form)])
-      (if (or (string? datum) (and (integer? datum) (exact? datum)))
-          datum
-          (violation "a choice must be a string or an integer" form))))
-
-  ;; the text an argument has to have to match the choice
-  (define (choice-text datum)
-    (if (string? datum) datum (number->string datum)))
+           (loop #'more (cons datum seen)))])))
 
   (define (read-description form)
     (if (string? (syntax->datum form))
