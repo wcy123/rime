@@ -566,7 +566,8 @@ without intercepting `exit`.
 
 The placeholder shows the arity: `<int> <int>` for 2, `<string>...` for `(1 +)`, `[<string>...]` for
 `(0 +)`, `[<int>] [<int>]` for `(0 2)`. A custom `:type` procedure is shown as `<value>`.
-The program name is the first element of `(command-line)`.
+The program name is the first element of `(command-line)`, the script as it was given. When there is no script
+(a REPL, `--eval`), `(command-line)` is `("")` and the name is `program`.
 
 There is no place in the usage for a sentence about the program, and no built-in `--version`: the program
 does both with the help hook and a look at its arguments, see [Recipes](#recipes).
