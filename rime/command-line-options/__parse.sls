@@ -237,29 +237,33 @@
   ;; each choice is a string or an exact integer, there is at least one, and no two of them have the
   ;; same text (the argument 1 would match both "1" and 1)
   (define (read-choices form)
-    (with-syntax ([choices (datum->syntax #'here (read-choice-list form form '()))])
+    (with-syntax ([choices (datum->syntax #'here (read-choice-list form))])
       #'(make-choice-converter 'choices)))
 
-  ;; the datums of the literals in `rest`, checked; `texts` are the texts of those before
-  (define (read-choice-list rest whole texts)
-    (syntax-case rest ()
-      [() (if (null? texts)
-              (violation ":choices needs at least one choice" whole)
-              '())]
-      [(choice . more)
-       (let ([text (choice-text #'choice)])
-         (when (member text texts)
-           (violation "duplicate choice" #'choice))
-         (cons (syntax->datum #'choice)
-               (read-choice-list #'more whole (cons text texts))))]
-      [_ (violation ":choices must be a list of strings or integers" whole)]))
+  ;; the datums of the literals of the list `whole`, checked; `datums` are those before, the latest first
+  (define (read-choice-list whole)
+    (let loop ([rest whole] [datums '()])
+      (syntax-case rest ()
+        [() (if (null? datums)
+                (violation ":choices needs at least one choice" whole)
+                (reverse datums))]
+        [(choice . more)
+         (let ([datum (read-choice #'choice)])
+           (when (member (choice-text datum) (map choice-text datums))
+             (violation "duplicate choice" #'choice))
+           (loop #'more (cons datum datums)))]
+        [_ (violation ":choices must be a list of strings or integers" whole)])))
+
+  ;; a choice is a string or an exact integer
+  (define (read-choice form)
+    (let ([datum (syntax->datum form)])
+      (if (or (string? datum) (and (integer? datum) (exact? datum)))
+          datum
+          (violation "a choice must be a string or an integer" form))))
 
   ;; the text an argument has to have to match the choice
-  (define (choice-text form)
-    (let ([datum (syntax->datum form)])
-      (cond [(string? datum) datum]
-            [(and (integer? datum) (exact? datum)) (number->string datum)]
-            [else (violation "a choice must be a string or an integer" form)])))
+  (define (choice-text datum)
+    (if (string? datum) datum (number->string datum)))
 
   (define (read-description form)
     (if (string? (syntax->datum form))
