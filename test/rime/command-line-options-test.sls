@@ -1791,6 +1791,13 @@
   (define-test test-program-name-is-a-string
     (CHECK eq? (string? (program-name)) #t))
 
+  ;; (command-line) is ("") when there is no script: a REPL, or a program given with --eval
+  (define-test test-program-name-of
+    (CHECK equal? (program-name-of '("prog" "-n" "3")) "prog")
+    (CHECK equal? (program-name-of '("")) "program")
+    (CHECK equal? (program-name-of '()) "program")
+    (CHECK equal? (program-name-of '(#f)) "program"))
+
   ;; ========================================
   ;; converters
   ;; ========================================
