@@ -34,6 +34,10 @@
   (define help-spec
     (make-option-ast "-h" "--help" 0 0 #f "show this help message and exit" #f #f #f))
 
+  ;; the key of the usage text in the table: `fail` reads it from there, so that every error of the
+  ;; command line has the usage of the parser, and (option "usage") reads it too
+  (define usage-key (list 'usage))
+
   ;; ========================================
   ;; parsing the command line
   ;; ========================================
@@ -86,7 +90,8 @@
   ;;; `-h` and `--help` are a flag like the others: `(option "help")` tells whether it was given.
   ;;; The scan stops there and the checks that need the rest are skipped. Nothing is printed and
   ;;; nothing exits here, that is for `parse-or-exit`. A mistake of the command line is raised as a
-  ;;; `command-line-error?` condition that carries the usage of this parser.
+  ;;; `command-line-error?` condition that carries the usage of this parser: the usage is in the
+  ;;; table from the start, and `fail` reads it from there.
   ;;;
   ;;; @par Example
   ;;; With the options `[:short "-v" :arity 0]` and `[:short "-n" :long "--count" :type int]`:
@@ -99,22 +104,19 @@
   ;;;   => error: invalid argument value ("-n" "x")
   ;;; @endcode
   (define (parse-command-line specs args positionals)
-    ;; the library's own failures leave here with the usage of this parser attached; a condition is
-    ;; immutable, so the usage goes into a copy
-    (guard (e [(command-line-error? e)
-               (raise (command-line-condition (condition-message e) (condition-irritants e)
-                                              (format-usage specs (program-name) positionals)))])
-      (let* ([result (scan-tokens specs args)]
-             [table (parse-result-table result)])
-        (unless (hashtable-contains? table help-spec)
-          (check-required specs table)
-          (check-collected specs table)
-          (store-positional-words! table (distribute-words positionals (parse-result-words result))))
-        (make-accessor specs positionals table))))
+    (let* ([usage (format-usage specs (program-name) positionals)]
+           [result (scan-tokens specs args usage)]
+           [table (parse-result-table result)])
+      (unless (hashtable-contains? table help-spec)
+        (check-required specs table)
+        (check-collected specs table)
+        (store-positional-words! table
+                                 (distribute-words positionals (parse-result-words result) table)))
+      (make-accessor specs positionals table)))
 
   ;;; @brief What `scan-tokens` found on the command line.
   ;;; @li `table`: option-ast or positional-ast -> the converted arguments, of what was given;
-  ;;;     `help-spec` is in it when -h or --help was met
+  ;;;     `usage-key` -> the usage text; `help-spec` is in it when -h or --help was met
   ;;; @li `words`: the positional words, in order; the ones before `--` are unescaped
   (define-record-type parse-result
     (fields table words))
@@ -122,6 +124,7 @@
   ;;; @brief Reads the command line: the options go to a table, the other words are positional.
   ;;; @param specs   list of option-ast
   ;;; @param tokens  list of strings, the command line
+  ;;; @param usage   string, the usage text of the parser; it goes into the table under `usage-key`
   ;;; @return a parse-result
   ;;;
   ;;; Options and positional words may come in any order. `--` ends the options, and the words
@@ -139,8 +142,9 @@
   ;;; -n               error: too few arguments for option ("-n")
   ;;; -n x             error: invalid argument value ("-n" "x")
   ;;; @endcode
-  (define (scan-tokens specs tokens)
+  (define (scan-tokens specs tokens usage)
     (let ([table (make-eq-hashtable)])
+      (hashtable-set! table usage-key usage)
       (let loop ([tokens tokens] [words '()])
         (cond
          [(null? tokens)
@@ -167,14 +171,14 @@
       (cond
        [equals
         (when (= 0 (option-ast-max spec))
-          (fail "option does not take arguments" name))
+          (fail table "option does not take arguments" name))
         (store! table spec name (list (substring token (+ equals 1) (string-length token))))
         rest]
        [else
         (let-values ([(items remaining) (take-arguments specs rest (option-ast-max spec))])
           ;; an option that collects its arguments is checked on the total, see check-collected
           (when (and (not (collecting? spec)) (< (length items) (option-ast-min spec)))
-            (fail "too few arguments for option" name))
+            (fail table "too few arguments for option" name))
           (store! table spec name items)
           remaining)])))
 
@@ -195,7 +199,7 @@
     (> (option-ast-max spec) 1))
 
   (define (store! table spec name items)
-    (let ([values (convert-items spec name items)])
+    (let ([values (convert-items spec name items table)])
       (hashtable-set! table spec
                       (if (collecting? spec)
                           (append (hashtable-ref table spec '()) values)
@@ -220,19 +224,20 @@
          (let ([count (length (hashtable-ref table spec '()))]
                [name (or (option-ast-long spec) (option-ast-short spec))])
            (when (< count (option-ast-min spec))
-             (fail "too few arguments for option" name))
+             (fail table "too few arguments for option" name))
            (when (> count (option-ast-max spec))
-             (fail "too many arguments for option" name)))))
+             (fail table "too many arguments for option" name)))))
      specs))
 
   ;; the converter reports its own failure, it is given the name of the option for that
-  (define (convert-items spec name items)
+  (define (convert-items spec name items table)
     (let ([convert (converter-convert (spec-converter spec))])
-      (map (lambda (item) (convert (unescape item) name)) items)))
+      (map (lambda (item) (convert (unescape item) name table)) items)))
 
   ;;; @brief Shares the positional words out to the positionals, in order.
   ;;; @param positionals  list of positional-ast
   ;;; @param words        list of strings, the positional words
+  ;;; @param table        the table of the parse-result, for the usage of an error
   ;;; @return list of (positional . words), one for each positional
   ;;;
   ;;; Each positional gets as many words as its minimum, and the one that takes a variable number of
@@ -249,19 +254,19 @@
   ;;; p 1, q 1:                       a b c   =>  error: too many positional arguments ("c")
   ;;; no positional:                  a b     =>  error: unexpected positional argument ("a" "b")
   ;;; @endcode
-  (define (distribute-words positionals words)
+  (define (distribute-words positionals words table)
     (cond
      [(null? positionals)
       (when (pair? words)
-        (apply fail "unexpected positional argument" words))
+        (apply fail table "unexpected positional argument" words))
       '()]
      [else
       (let* ([count (length words)]
              [minimum (sum (map positional-ast-min positionals))]
              [maximum (sum (map positional-ast-max positionals))])
-        (check-enough-words positionals count)
+        (check-enough-words positionals count table)
         (when (> count maximum)
-          (apply fail "too many positional arguments" (list-tail words maximum)))
+          (apply fail table "too many positional arguments" (list-tail words maximum)))
         (let loop ([positionals positionals] [words words] [shared '()])
           (if (null? positionals)
               (reverse shared)
@@ -289,15 +294,16 @@
      (lambda (pair)
        (let ([convert (converter-convert (spec-converter (car pair)))]
              [name (positional-ast-name (car pair))])
-         (hashtable-set! table (car pair) (map (lambda (word) (convert word name)) (cdr pair)))))
+         (hashtable-set! table (car pair)
+                         (map (lambda (word) (convert word name table)) (cdr pair)))))
      shared))
 
   ;; every positional needs its minimum, the first one that lacks words is the one to blame
-  (define (check-enough-words positionals count)
+  (define (check-enough-words positionals count table)
     (let loop ([positionals positionals] [left count])
       (unless (null? positionals)
         (when (< left (positional-ast-min (car positionals)))
-          (fail "too few positional arguments" (positional-ast-name (car positionals))))
+          (fail table "too few positional arguments" (positional-ast-name (car positionals))))
         (loop (cdr positionals) (- left (positional-ast-min (car positionals)))))))
 
   (define (sum numbers) (apply + numbers))
@@ -323,7 +329,8 @@
     (for-each
      (lambda (spec)
        (when (and (option-ast-required spec) (not (hashtable-contains? table spec)))
-         (fail "missing required option" (or (option-ast-long spec) (option-ast-short spec)))))
+         (fail table "missing required option"
+               (or (option-ast-long spec) (option-ast-short spec)))))
      specs))
 
   ;;; @brief Makes the procedure that the program reads the result with.
@@ -358,7 +365,7 @@
           (let ([name (if (symbol? key) (symbol->string key) key)])
             (cond
              [(string=? name "usage")
-              (format-usage specs (program-name) positionals)]
+              (hashtable-ref table usage-key #f)]
              [(find-spec-by-name (append specs (list help-spec)) name)
               => (lambda (spec)
                    (if (and (not (unbound? default)) (not (hashtable-contains? table spec)))
@@ -572,8 +579,9 @@
 
   ;; A converter turns the text of an argument into a value, and it deals with everything about that:
   ;;   label    how an argument is shown in the usage: "<int>", "{json,text}"
-  ;;   convert  (convert text option-name) => the value; when the text does not suit, it raises the
-  ;;            error the user sees, so each kind of converter has its own failure
+  ;;   convert  (convert text option-name table) => the value; when the text does not suit, it raises
+  ;;            the error the user sees with (fail table ...), so each kind of converter has its own
+  ;;            failure
   ;; The runtime only uses these two, it does not know which kinds of converter there are.
   (define-record-type converter
     (fields label convert))
@@ -587,8 +595,8 @@
   ;; whatever it raises is reported as an invalid argument value
   (define (make-procedure-converter label procedure)
     (make-converter label
-                    (lambda (text name)
-                      (guard (e [else (fail "invalid argument value" name text)])
+                    (lambda (text name table)
+                      (guard (e [else (fail table "invalid argument value" name text)])
                         (procedure text)))))
 
   ;; the converter of a :type written by the user, which is any procedure of one argument
@@ -600,35 +608,37 @@
   (define (make-choice-converter choices)
     (make-converter
      (string-append "{" (join (map choice->text choices) ",") "}")
-     (lambda (text name)
+     (lambda (text name table)
        (let loop ([rest choices])
          (cond [(null? rest)
-                (fail "argument must be one of the choices" name text choices)]
+                (fail table "argument must be one of the choices" name text choices)]
                [(string=? (choice->text (car rest)) text) (car rest)]
                [else (loop (cdr rest))])))))
 
   (define (choice->text choice)
     (if (string? choice) choice (number->string choice)))
 
+  ;; the failure of the three conversions below is turned into an invalid argument value by
+  ;; make-procedure-converter, so they only need to raise something
   (define (convert-string s) s)
 
   (define (convert-int s)
     (let ([n (string->number s 10)])
       (if (and n (integer? n) (exact? n) (fixnum? n))
           n
-          (fail "not an integer" s))))
+          (error 'convert-int "not an integer" s))))
 
   (define (convert-float s)
     (let ([n (string->number s 10)])
       (if (and n (real? n))
           (inexact n)
-          (fail "not a number" s))))
+          (error 'convert-float "not a number" s))))
 
   (define (convert-bool s)
     (let ([word (string-downcase s)])
       (cond [(member word '("true" "yes" "on" "1")) #t]
             [(member word '("false" "no" "off" "0")) #f]
-            [else (fail "not a boolean" s)])))
+            [else (error 'convert-bool "not a boolean" s)])))
 
   ;; the converters that :type knows by name: the name -> the converter
   (define builtin-converters
@@ -646,22 +656,19 @@
 
   ;; A problem with the command line: the condition is an &error with the who, the message and the
   ;; details that an (error 'opt-parser ...) has, and it is also a &command-line-error, so that a
-  ;; program can tell it from its own errors. The usage is added where the parser is known, see
-  ;; parse-command-line; until then it is #f.
+  ;; program can tell it from its own errors. The usage is the one of the parser, from the table.
   (define-condition-type &command-line-error &error
     make-command-line-error command-line-error?
     (usage command-line-error-usage))
 
   ;; details are the values the message is about: the option name, the text that did not fit, ...
-  (define (fail message . details)
-    (raise (command-line-condition message details #f)))
-
-  (define (command-line-condition message details usage)
-    (condition (make-error)
-               (make-who-condition 'opt-parser)
-               (make-message-condition message)
-               (make-irritants-condition details)
-               (make-command-line-error usage)))
+  ;; The table has the usage of the parser, see scan-tokens.
+  (define (fail table message . details)
+    (raise (condition (make-error)
+                      (make-who-condition 'opt-parser)
+                      (make-message-condition message)
+                      (make-irritants-condition details)
+                      (make-command-line-error (hashtable-ref table usage-key #f)))))
 
   ;; The mistakes of the program that reads the result, a name that does not exist, a key that is
   ;; not a name: an ordinary error, not a problem with the command line.
