@@ -99,8 +99,9 @@
   ;;;   => error: invalid argument value ("-n" "x")
   ;;; @endcode
   (define (parse-command-line specs args positionals)
-    ;; the library's own failures leave here with the usage of this parser attached
-    (guard (e [(and (command-line-error? e) (not (command-line-error-usage e)))
+    ;; the library's own failures leave here with the usage of this parser attached; a condition is
+    ;; immutable, so the usage goes into a copy
+    (guard (e [(command-line-error? e)
                (raise (command-line-condition (condition-message e) (condition-irritants e)
                                               (format-usage specs (program-name) positionals)))])
       (let* ([result (scan-tokens specs args)]
