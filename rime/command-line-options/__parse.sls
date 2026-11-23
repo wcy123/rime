@@ -241,17 +241,18 @@
 
   ;; the datums of the list `whole`, checked
   (define (read-choice-list whole)
-    (syntax-case whole ()
-      [() (violation ":choices needs at least one choice" whole)]
-      [(choice0 choice1 ...) (for-all string? (syntax->datum whole))
-       (distinct-datums whole)]
-      [(choice0 choice1 ...) (for-all integer-choice? (syntax->datum whole))
-       (distinct-datums whole)]
-      [(choice0 choice1 ...) (for-all choice? (syntax->datum whole))
-       (violation ":choices must be all strings or all integers" whole)]
-      [(choice0 choice1 ...)
-       (violation "a choice must be a string or an integer" whole)]
-      [_ (violation ":choices must be a list of strings or integers" whole)]))
+    (let ([datums (syntax->datum whole)])
+      (syntax-case whole ()
+        [() (violation ":choices needs at least one choice" whole)]
+        [(choice0 choice1 ...) (for-all string? datums)
+         (distinct-datums datums whole)]
+        [(choice0 choice1 ...) (for-all integer-choice? datums)
+         (distinct-datums datums whole)]
+        [(choice0 choice1 ...) (for-all choice? datums)
+         (violation ":choices must be all strings or all integers" whole)]
+        [(choice0 choice1 ...)
+         (violation "a choice must be a string or an integer" whole)]
+        [_ (violation ":choices must be a list of strings or integers" whole)])))
 
   (define (integer-choice? datum)
     (and (integer? datum) (exact? datum)))
@@ -259,12 +260,11 @@
   (define (choice? datum)
     (or (string? datum) (integer-choice? datum)))
 
-  ;; the datums of the list `whole`, when no two of them are the same
-  (define (distinct-datums whole)
-    (let ([datums (syntax->datum whole)])
-      (when (has-duplicate? datums)
-        (violation "duplicate choice" whole))
-      datums))
+  ;; `datums`, when no two of them are the same; `whole` is the list they come from
+  (define (distinct-datums datums whole)
+    (when (has-duplicate? datums)
+      (violation "duplicate choice" whole))
+    datums)
 
   (define (has-duplicate? items)
     (cond [(null? items) #f]
