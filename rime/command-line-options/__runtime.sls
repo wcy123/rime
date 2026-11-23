@@ -38,12 +38,44 @@
   ;; parsing the command line
   ;; ========================================
 
-  ;; The parser is a few steps, each a function with its inputs and outputs:
-  ;;   scan-tokens             the command line -> the options, in a table, and the positional words
-  ;;   check-required          every :required option is in the table
-  ;;   distribute-words        the positional words -> the words of each positional
-  ;;   store-positional-words! convert them and put them in the table
-  ;; parse-command-line calls them in this order and builds the accessor.
+  ;;; @brief The parser: the command line goes in, the accessor of the program comes out.
+  ;;;
+  ;;; `parse-command-line` runs a few steps in this order. Each step is a function with its own
+  ;;; input and output. A step that finds a mistake of the command line raises it with `fail`, and
+  ;;; the steps after it do not run.
+  ;;;
+  ;;; @li `scan-tokens`: the command line -> the options, in a table, and the positional words.
+  ;;;     At -h or --help it calls the help hook, and then the steps below, up to
+  ;;;     `store-positional-words!`, are skipped.
+  ;;; @li `check-required`: every `:required` option is in the table.
+  ;;; @li `check-collected`: the arity of an option that collects its arguments, on the total.
+  ;;; @li `distribute-words`: the positional words -> the words of each positional.
+  ;;; @li `store-positional-words!`: converts the words of each positional, puts them in the table.
+  ;;; @li `make-accessor`: the table -> the procedure `(option "name")` that the program gets.
+  ;;;
+  ;;; @par Example
+  ;;; The options are `[:short "-v" :arity 0]` and `[:short "-n" :long "--count" :type int]`.
+  ;;; The positionals are `source` (one or more words) and `dest` (exactly one). The command line
+  ;;; `a -v -n 3 b c` goes through the steps like this:
+  ;;; @code
+  ;;; scan-tokens              words ("a" "b" "c"); table: -v => (), -n => (3)
+  ;;; check-required           no error, no option is required
+  ;;; check-collected          no error, no option takes more than one argument
+  ;;; distribute-words         (("source" "a" "b") ("dest" "c"))
+  ;;; store-positional-words!  table: source => ("a" "b"), dest => ("c")
+  ;;; make-accessor            (option "v") => #t          (option "n") => 3
+  ;;;                          (option "source") => ("a" "b")   (option "dest") => "c"
+  ;;; @endcode
+  ;;;
+  ;;; @par Errors
+  ;;; With `[:long "--input" :required]` added to the options above, the first step that finds a
+  ;;; mistake raises it:
+  ;;; @code
+  ;;; a -n                the step: scan-tokens        too few arguments for option ("-n")
+  ;;; -n x a b --input x  the step: scan-tokens        invalid argument value ("-n" "x")
+  ;;; a b                 the step: check-required     missing required option ("--input")
+  ;;; a --input x         the step: distribute-words   too few positional arguments ("dest")
+  ;;; @endcode
 
   ;; (parse-command-line specs args positionals) => the accessor
   ;;   positionals: list of positional-ast, '() when the command line takes no positional words
