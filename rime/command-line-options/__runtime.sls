@@ -7,7 +7,6 @@
           parse-or-exit
           command-line-error?
           command-line-error-usage
-          default-on-help
           builtin-converters
           builtin-converter
           make-choice-converter
@@ -29,44 +28,43 @@
   ;;   store-positional-words! convert them and put them in the table
   ;; parse-command-line calls them in this order and builds the accessor.
 
-  ;; (parse-command-line specs args on-help positionals) => the accessor
-  ;;   on-help: called with the usage text at -h and --help
+  ;; (parse-command-line specs args positionals) => the accessor
   ;;   positionals: list of positional-ast, '() when the command line takes no positional words
-  (define (parse-command-line specs args on-help positionals)
+  ;; -h and --help are a flag like the others: the accessor tells (option "help") whether it was
+  ;; given. The words after it are not read, and the checks that need them are skipped.
+  (define (parse-command-line specs args positionals)
     ;; the library's own failures leave here with the usage of this parser attached
     (with-usage
      (lambda () (format-usage specs (program-name) positionals))
      (lambda ()
-       (let* ([result (scan-tokens specs
-                                   (lambda () (on-help (format-usage specs (program-name) positionals)))
-                                   args)]
+       (let* ([result (scan-tokens specs args)]
               [table (parse-result-table result)])
-         (unless (parse-result-help-asked? result)
+         (unless (hashtable-contains? table help-spec)
            (check-required specs table)
            (check-collected specs table)
            (store-positional-words! table (distribute-words positionals (parse-result-words result))))
          (make-accessor specs positionals table)))))
 
-  ;; table          option-ast or positional-ast -> the converted arguments, of what was given
+  ;; table          option-ast or positional-ast -> the converted arguments, of what was given;
+  ;;                help-spec is in it when -h or --help was met
   ;; words          the positional words, in order, the ones before -- unescaped
-  ;; help-asked?    #t when -h or --help was met, the words after it are not read
   (define-record-type parse-result
-    (fields table words help-asked?))
+    (fields table words))
 
-  ;; (scan-tokens specs show-help tokens) => parse-result
-  ;; Options and positional words may come in any order. show-help is called, with no argument, at
-  ;; -h and --help.
-  (define (scan-tokens specs show-help tokens)
+  ;; (scan-tokens specs tokens) => parse-result
+  ;; Options and positional words may come in any order. At -h and --help the scan stops: the table
+  ;; has help-spec in it, and the words after it are not read.
+  (define (scan-tokens specs tokens)
     (let ([table (make-eq-hashtable)])
       (let loop ([tokens tokens] [words '()])
         (cond
          [(null? tokens)
-          (make-parse-result table (reverse words) #f)]
+          (make-parse-result table (reverse words))]
          [(string=? (car tokens) "--")
-          (make-parse-result table (append (reverse words) (cdr tokens)) #f)]
+          (make-parse-result table (append (reverse words) (cdr tokens)))]
          [(member (car tokens) '("-h" "--help"))
-          (show-help)
-          (make-parse-result table (reverse words) #t)]
+          (hashtable-set! table help-spec '())
+          (make-parse-result table (reverse words))]
          [(option-like? (car tokens) specs)
           (loop (parse-option specs table (car tokens) (cdr tokens)) words)]
          [else
@@ -197,12 +195,9 @@
          (fail "missing required option" (or (option-ast-long spec) (option-ast-short spec)))))
      specs))
 
-  (define (default-on-help text)
-    (display text)
-    (exit 0))
-
   ;; the procedure the user gets: (option "count"), (option "file"), (option "help"); the names are
-  ;; those of the options without their dashes, the name of the positional, and "help" for the usage.
+  ;; those of the options without their dashes and the name of the positional. "help" is #t when -h
+  ;; was given, and "usage" is the usage text.
   ;; (option "count" 3) is the same, but it gives 3 when the option was not given on the command line:
   ;; the value is the program's own, it is not converted or checked. An option that was given with
   ;; no arguments, -o alone, was given, and a positional that got no words was not.
@@ -212,9 +207,9 @@
       (if (or (string? key) (symbol? key))
           (let ([name (if (symbol? key) (symbol->string key) key)])
             (cond
-             [(string=? name "help")
+             [(string=? name "usage")
               (format-usage specs (program-name) positionals)]
-             [(find-spec-by-name specs name)
+             [(find-spec-by-name (append specs (list help-spec)) name)
               => (lambda (spec)
                    (if (and (not (unbound? default)) (not (hashtable-contains? table spec)))
                        default
@@ -585,11 +580,16 @@
   (define (write->string datum)
     (call-with-string-output-port (lambda (port) (write datum port))))
 
-  ;; (parse-or-exit parser arguments) => the accessor of (parser arguments); when the command line
-  ;; is wrong, prints the problem and the usage to the error port and exits with 2. Errors that are
-  ;; not about the command line are not caught.
+  ;; (parse-or-exit parser arguments) => the accessor of (parser arguments); when -h or --help was
+  ;; given, prints the usage and exits with 0; when the command line is wrong, prints the problem and
+  ;; the usage to the error port and exits with 2. Errors that are not about the command line are not
+  ;; caught.
   (define (parse-or-exit parser arguments)
-    (guard (e [(command-line-error? e)
-               (display (format-command-line-error e) (current-error-port))
-               (exit 2)])
-      (parser arguments))))
+    (let ([option (guard (e [(command-line-error? e)
+                             (display (format-command-line-error e) (current-error-port))
+                             (exit 2)])
+                    (parser arguments))])
+      (when (option "help")
+        (display (option "usage"))
+        (exit 0))
+      option)))
