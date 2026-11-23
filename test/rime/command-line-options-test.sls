@@ -846,8 +846,12 @@
       (CHECK equal? (error-message (lambda () (option "z"))) "unknown option")
       (CHECK equal? (error-message (lambda () (option "nope"))) "unknown option")
       (CHECK equal? (error-message (lambda () (option "-n"))) "unknown option")
-      (CHECK equal? (error-message (lambda () (option "--count"))) "unknown option")
-      (CHECK equal? (error-message (lambda () (option "h"))) "unknown option")))
+      (CHECK equal? (error-message (lambda () (option "--count"))) "unknown option")))
+
+  (define-test test-h-is-the-short-name-of-help
+    (CHECK eq? ((parse '()) "h") #f)
+    (CHECK eq? ((parse '("-h")) "h") #t)
+    (CHECK eq? ((parse '("--help")) 'h) #t))
 
   (define-test test-accessor-unknown-option-lists-the-names-that-exist
     (let ([option (parse '())])
@@ -856,8 +860,8 @@
                        "r" "range" "p" "pair" "u" "upper" "o" "opt-list" "args")))
       ;; the first irritant is the key as it was given, a symbol stays a symbol
       (CHECK equal? (car (error-irritants (lambda () (option 'nope)))) 'nope)
-      (CHECK equal? (error-irritants (lambda () (option "h")))
-             (list "h" (cadr (error-irritants (lambda () (option "nope"))))))))
+      (CHECK equal? (error-irritants (lambda () (option "zz")))
+             (list "zz" (cadr (error-irritants (lambda () (option "nope"))))))))
 
   (define-test test-accessor-unknown-name-with-dashes-says-names-have-no-dashes
     (let ([option (parse '())])
@@ -1602,7 +1606,7 @@
   (define-test test-the-parser-still-takes-the-arguments-alone
     (CHECK equal? ((parse '("-n" "7")) "n") 7))
 
-  ;; The real -h path of a macro-defined parser prints usage and calls (exit 0).
+  ;; The real -h path of parse-or-exit prints the usage and calls (exit 0).
   ;; exit and the output port are intercepted through eval in an implementation specific
   ;; environment (cf. rime/rime-0/__feature-registry.sls); the test is skipped elsewhere.
   (define (try-environment import-spec)
