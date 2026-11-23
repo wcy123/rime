@@ -4,9 +4,14 @@
 ;; This library is imported `for expand`.
 (library (rime command-line-options __codegen)
   (export generate-definition)
-  (import (rnrs (6))
-          (rime command-line-options __ast)
-          (rime command-line-options __runtime))
+  (import (only (rnrs (6)) ... case-lambda datum->syntax define let list map or syntax with-syntax)
+          (only (rime command-line-options __ast)
+                make-option-ast make-positional-ast option-ast-converter option-ast-description
+                option-ast-long option-ast-max option-ast-metavar option-ast-min
+                option-ast-required option-ast-short positional-ast-converter
+                positional-ast-description positional-ast-max positional-ast-min
+                positional-ast-name)
+          (only (rime command-line-options __runtime) default-on-help parse-command-line))
 
   ;; parser: the identifier to define; options: list of option-ast;
   ;; positionals: list of positional-ast, in the order of the clauses
