@@ -100,16 +100,16 @@
   ;;; @endcode
   (define (parse-command-line specs args positionals)
     ;; the library's own failures leave here with the usage of this parser attached
-    (with-usage
-     (lambda () (format-usage specs (program-name) positionals))
-     (lambda ()
-       (let* ([result (scan-tokens specs args)]
-              [table (parse-result-table result)])
-         (unless (hashtable-contains? table help-spec)
-           (check-required specs table)
-           (check-collected specs table)
-           (store-positional-words! table (distribute-words positionals (parse-result-words result))))
-         (make-accessor specs positionals table)))))
+    (guard (e [(and (command-line-error? e) (not (command-line-error-usage e)))
+               (raise (command-line-condition (condition-message e) (condition-irritants e)
+                                              (format-usage specs (program-name) positionals)))])
+      (let* ([result (scan-tokens specs args)]
+             [table (parse-result-table result)])
+        (unless (hashtable-contains? table help-spec)
+          (check-required specs table)
+          (check-collected specs table)
+          (store-positional-words! table (distribute-words positionals (parse-result-words result))))
+        (make-accessor specs positionals table))))
 
   ;;; @brief What `scan-tokens` found on the command line.
   ;;; @li `table`: option-ast or positional-ast -> the converted arguments, of what was given;
@@ -646,7 +646,7 @@
   ;; A problem with the command line: the condition is an &error with the who, the message and the
   ;; details that an (error 'opt-parser ...) has, and it is also a &command-line-error, so that a
   ;; program can tell it from its own errors. The usage is added where the parser is known, see
-  ;; with-usage; until then it is #f.
+  ;; parse-command-line; until then it is #f.
   (define-condition-type &command-line-error &error
     make-command-line-error command-line-error?
     (usage command-line-error-usage))
@@ -666,13 +666,6 @@
   ;; not a name: an ordinary error, not a problem with the command line.
   (define (accessor-fail message . details)
     (apply error 'opt-parser message details))
-
-  ;; (with-usage make-usage thunk): runs thunk; a command-line error raised in it is raised again
-  ;; with the usage text (from the procedure make-usage) in it. Other exceptions pass untouched.
-  (define (with-usage make-usage thunk)
-    (guard (e [(and (command-line-error? e) (not (command-line-error-usage e)))
-               (raise (command-line-condition (condition-message e) (condition-irritants e) (make-usage)))])
-      (thunk)))
 
   ;; "prog: sentence", a blank line, and the usage; what parse-or-exit prints. The sentence is
   ;; (describe-problem message details); a message that is not known is "message: detail ...".
