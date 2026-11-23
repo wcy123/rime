@@ -45,8 +45,8 @@
   ;;; the steps after it do not run.
   ;;;
   ;;; @li `scan-tokens`: the command line -> the options, in a table, and the positional words.
-  ;;;     At -h or --help it calls the help hook, and then the steps below, up to
-  ;;;     `store-positional-words!`, are skipped.
+  ;;;     At -h or --help it stops and puts the help flag in the table; the steps below, up to
+  ;;;     `store-positional-words!`, are skipped, and `(option "help")` is `#t`.
   ;;; @li `check-required`: every `:required` option is in the table.
   ;;; @li `check-collected`: the arity of an option that collects its arguments, on the total.
   ;;; @li `distribute-words`: the positional words -> the words of each positional.
@@ -77,10 +77,27 @@
   ;;; a --input x         the step: distribute-words   too few positional arguments ("dest")
   ;;; @endcode
 
-  ;; (parse-command-line specs args positionals) => the accessor
-  ;;   positionals: list of positional-ast, '() when the command line takes no positional words
-  ;; -h and --help are a flag like the others: the accessor tells (option "help") whether it was
-  ;; given. The words after it are not read, and the checks that need them are skipped.
+  ;;; @brief Parses a command line against the options of a parser.
+  ;;; @param specs        list of option-ast, the options of the parser
+  ;;; @param args         list of strings, the command line without the program name
+  ;;; @param positionals  list of positional-ast, '() when there are no positional words
+  ;;; @return the accessor, see `make-accessor`
+  ;;;
+  ;;; `-h` and `--help` are a flag like the others: `(option "help")` tells whether it was given.
+  ;;; The scan stops there and the checks that need the rest are skipped. Nothing is printed and
+  ;;; nothing exits here, that is for `parse-or-exit`. A mistake of the command line is raised as a
+  ;;; `command-line-error?` condition that carries the usage of this parser.
+  ;;;
+  ;;; @par Example
+  ;;; With the options `[:short "-v" :arity 0]` and `[:short "-n" :long "--count" :type int]`:
+  ;;; @code
+  ;;; (parse-command-line specs '("-v" "-n" "3") '())
+  ;;;   => an accessor: (option "v") => #t    (option "count") => 3    (option "help") => #f
+  ;;; (parse-command-line specs '("-h") '())
+  ;;;   => an accessor: (option "help") => #t    (option "v") => #f
+  ;;; (parse-command-line specs '("-n" "x") '())
+  ;;;   => error: invalid argument value ("-n" "x")
+  ;;; @endcode
   (define (parse-command-line specs args positionals)
     ;; the library's own failures leave here with the usage of this parser attached
     (with-usage
@@ -94,15 +111,33 @@
            (store-positional-words! table (distribute-words positionals (parse-result-words result))))
          (make-accessor specs positionals table)))))
 
-  ;; table          option-ast or positional-ast -> the converted arguments, of what was given;
-  ;;                help-spec is in it when -h or --help was met
-  ;; words          the positional words, in order, the ones before -- unescaped
+  ;;; @brief What `scan-tokens` found on the command line.
+  ;;; @li `table`: option-ast or positional-ast -> the converted arguments, of what was given;
+  ;;;     `help-spec` is in it when -h or --help was met
+  ;;; @li `words`: the positional words, in order; the ones before `--` are unescaped
   (define-record-type parse-result
     (fields table words))
 
-  ;; (scan-tokens specs tokens) => parse-result
-  ;; Options and positional words may come in any order. At -h and --help the scan stops: the table
-  ;; has help-spec in it, and the words after it are not read.
+  ;;; @brief Reads the command line: the options go to a table, the other words are positional.
+  ;;; @param specs   list of option-ast
+  ;;; @param tokens  list of strings, the command line
+  ;;; @return a parse-result
+  ;;;
+  ;;; Options and positional words may come in any order. `--` ends the options, and the words
+  ;;; after it are positional words as they are. At -h and --help the scan stops: the table has
+  ;;; `help-spec` in it, and the words after it are not read.
+  ;;;
+  ;;; @par Example
+  ;;; With the options `-v` (a flag) and `-n` (an int):
+  ;;; @code
+  ;;; a -v -n 3 b c    words ("a" "b" "c"); table: -v => (), -n => (3)
+  ;;; a -- -n 3        words ("a" "-n" "3"); the table is empty
+  ;;; -v -h -n 3       words (); table: -v => (), help-spec => (); `-n 3` is not read
+  ;;; a --help b -n 3  words ("a"); table: help-spec => ()
+  ;;; \-x y            words ("-x" "y")
+  ;;; -n               error: too few arguments for option ("-n")
+  ;;; -n x             error: invalid argument value ("-n" "x")
+  ;;; @endcode
   (define (scan-tokens specs tokens)
     (let ([table (make-eq-hashtable)])
       (let loop ([tokens tokens] [words '()])
@@ -165,7 +200,18 @@
                           (append (hashtable-ref table spec '()) values)
                           values))))
 
-  ;; the arity of an option that collects its arguments is checked on the total, after the scan
+  ;;; @brief Checks the arity of the options that collect their arguments, on the total.
+  ;;; @param specs  list of option-ast
+  ;;; @param table  the table of the parse-result
+  ;;; @return unspecified; raises `too few arguments for option` or `too many arguments for option`
+  ;;;
+  ;;; @par Example
+  ;;; With the option `-p` that takes two arguments, and given `-p 1`, `-p 1 2 3` or `-p 1 2`:
+  ;;; @code
+  ;;; table: -p => ("1")           error: too few arguments for option ("-p")
+  ;;; table: -p => ("1" "2" "3")   error: too many arguments for option ("-p")
+  ;;; table: -p => ("1" "2")       no error
+  ;;; @endcode
   (define (check-collected specs table)
     (for-each
      (lambda (spec)
@@ -183,11 +229,25 @@
     (let ([convert (converter-convert (spec-converter spec))])
       (map (lambda (item) (convert (unescape item) name)) items)))
 
-  ;; (distribute-words positionals words) => list of (positional . words), one per positional
-  ;; The words that are not options are shared out to the positionals, in order. Each gets as many
-  ;; as its minimum, and the one that takes a variable number of words (there is at most one) also
-  ;; gets the words that are left over. Without a positional they are an error.
-  ;;   cp-like: source (1 +), dest 1; words a b c  =>  ((source a b) (dest c))
+  ;;; @brief Shares the positional words out to the positionals, in order.
+  ;;; @param positionals  list of positional-ast
+  ;;; @param words        list of strings, the positional words
+  ;;; @return list of (positional . words), one for each positional
+  ;;;
+  ;;; Each positional gets as many words as its minimum, and the one that takes a variable number of
+  ;;; words (there is at most one) also gets the words that are left over. A positional that lacks
+  ;;; words is an error, and so are words that no positional takes.
+  ;;;
+  ;;; @par Example
+  ;;; @code
+  ;;; source (1 +), dest 1:           a b c   =>  ((source a b) (dest c))
+  ;;;                                 a b     =>  ((source a) (dest b))
+  ;;;                                 a       =>  error: too few positional arguments ("dest")
+  ;;; first 1, middle (0 +), last 1:  a z     =>  ((first a) (middle) (last z))
+  ;;;                                 a m n z =>  ((first a) (middle m n) (last z))
+  ;;; p 1, q 1:                       a b c   =>  error: too many positional arguments ("c")
+  ;;; no positional:                  a b     =>  error: unexpected positional argument ("a" "b")
+  ;;; @endcode
   (define (distribute-words positionals words)
     (cond
      [(null? positionals)
@@ -212,7 +272,17 @@
                       (list-tail words own)
                       (cons (cons positional (list-head words own)) shared))))))]))
 
-  ;; converts the words of each positional and puts them in the table
+  ;;; @brief Converts the words of each positional and puts them in the table.
+  ;;; @param table   the table of the parse-result
+  ;;; @param shared  the result of `distribute-words`
+  ;;; @return unspecified; raises `invalid argument value` for a word that the type does not accept
+  ;;;
+  ;;; @par Example
+  ;;; With the positional `num` (one or more words) of `:type int`:
+  ;;; @code
+  ;;; words 3 4   table: num => (3 4)
+  ;;; words x     error: invalid argument value ("num" "x")
+  ;;; @endcode
   (define (store-positional-words! table shared)
     (for-each
      (lambda (pair)
@@ -236,7 +306,18 @@
         '()
         (cons (car list) (list-head (cdr list) (- count 1)))))
 
-  ;; the first required option that was not given is an error; the long name is the one to show
+  ;;; @brief Checks that every `:required` option is in the table.
+  ;;; @param specs  list of option-ast
+  ;;; @param table  the table of the parse-result
+  ;;; @return unspecified; raises `missing required option` for the first one that is missing,
+  ;;;         with its long name when it has one
+  ;;;
+  ;;; @par Example
+  ;;; With the options `-v` and `--input` (required):
+  ;;; @code
+  ;;; table: --input => ("x")   no error
+  ;;; table: empty              error: missing required option ("--input")
+  ;;; @endcode
   (define (check-required specs table)
     (for-each
      (lambda (spec)
@@ -244,12 +325,31 @@
          (fail "missing required option" (or (option-ast-long spec) (option-ast-short spec)))))
      specs))
 
-  ;; the procedure the user gets: (option "count"), (option "file"), (option "help"); the names are
-  ;; those of the options without their dashes and the name of the positional. "help" is #t when -h
-  ;; was given, and "usage" is the usage text.
-  ;; (option "count" 3) is the same, but it gives 3 when the option was not given on the command line:
-  ;; the value is the program's own, it is not converted or checked. An option that was given with
-  ;; no arguments, -o alone, was given, and a positional that got no words was not.
+  ;;; @brief Makes the procedure that the program reads the result with.
+  ;;; @param specs        list of option-ast
+  ;;; @param positionals  list of positional-ast
+  ;;; @param table        the table of the parse-result, with the words of the positionals stored
+  ;;; @return the procedure `(option name [default])`
+  ;;;
+  ;;; `name` is a string or a symbol: the name of an option without its dashes, the name of a
+  ;;; positional, "help" for the flag `-h`, or "usage" for the usage text. With a `default`, the
+  ;;; procedure gives it when the option was not given on the command line; the default is the
+  ;;; program's own value, it is not converted or checked. An option that was given with no
+  ;;; arguments, `-o` alone, was given, and a positional that got no words was not.
+  ;;;
+  ;;; @par Example
+  ;;; With the example of the steps above, `a -v -n 3 b c`:
+  ;;; @code
+  ;;; (option "v")        => #t           a flag that was given
+  ;;; (option "count")    => 3            `-n 3`; the name of an option has no dashes
+  ;;; (option "count" 9)  => 3            the default is used only when the option was not given
+  ;;; (option "source")   => ("a" "b")    a positional with several words is a list
+  ;;; (option "dest")     => "c"          a positional with one word is that word
+  ;;; (option "help")     => #f           `-h` was not given; #t when it was
+  ;;; (option "h")        => #f           the short name of the same flag
+  ;;; (option "usage")    => "Usage: ..." the usage text, for any command line
+  ;;; (option "nope")     => error: unknown option
+  ;;; @endcode
   (define (make-accessor specs positionals table)
     ;; default is `unbound` when the program gave none; any other value is its default, even #f
     (define (lookup key default)
