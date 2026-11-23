@@ -186,7 +186,7 @@
 
   (define (ignore) #f)
 
-  (define reserved-names '("h" "help"))
+  (define reserved-names '("h" "help" "usage"))
 
   ;; the max of an option that takes any number of arguments
   (define unlimited (greatest-fixnum))
@@ -231,7 +231,7 @@
            names)
           (loop (cdr options) (append names seen))))))
 
-  (define reserved-message "-h and --help are reserved for the built-in help")
+  (define reserved-message "-h, --help and the name usage are reserved for the built-in help")
 
   ;; the names to read the option by: the short name without its dash, the long name without its
   ;; two dashes, each only once

@@ -20,9 +20,10 @@
   ;;          | :choices (literal ...) | :description "text" | :required
   ;;   a clause with :positional name describes positional words: [:positional name field ...]
   ;;   name   = "-x" or -x, "--long" or --long; a clause needs a :short or a :long
-  ;; defines (parser arguments [on-help]) => accessor procedure; on-help takes the usage text and
-  ;; replaces the printing and the (exit 0) of -h; (parse-or-exit parser arguments) exits with 2 on a
-  ;; wrong command line; a wrong command line is a command-line-error? condition, which has the usage
+  ;; defines (parser arguments) => accessor procedure; (option "help") is #t when -h was given and
+  ;; (option "usage") is the usage text; (parse-or-exit parser arguments) prints the usage and exits
+  ;; with 0 at -h, and exits with 2 on a wrong command line; a wrong command line is a
+  ;; command-line-error? condition, which has the usage
   ;;
   ;; Reading and writing are separate steps: the clauses are first read into option-ast records
   ;; (__parse.sls), then the definition is written from the records (__codegen.sls).

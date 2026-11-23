@@ -36,8 +36,7 @@ The names to read an option by are the names without the dashes. A runnable vers
 
 Each `[...]` clause defines one option, except a clause with `:positional`, which describes the
 positional arguments, see [Positional arguments](#positional-arguments). `<parser>` becomes a
-function of one argument, the list of command line arguments (without the program name), and an
-optional second one, the [help hook](#help).
+function of one argument, the list of command line arguments (without the program name).
 
 | field                | meaning                                                    | default    |
 |----------------------|------------------------------------------------------------|------------|
@@ -61,7 +60,7 @@ as syntax violations.
 ## Names
 
 Option names are strings: `:short "-b"` (a single dash) and `:long "--long-name"` (two dashes).
-Names must not contain `=`, `,` or whitespace. `-h` and `--help` are reserved.
+Names must not contain `=`, `,` or whitespace. `-h`, `--help` and the name `usage` are reserved.
 There is no clustering, `-vq` is an ordinary word, not `-v -q`.
 
 The program reads an option by its name without the dashes: `"b"` for `:short "-b"`, `"long-name"`
@@ -283,7 +282,8 @@ How the words are given on the command line is in [Command line syntax](#command
 |-----------------------------------------|-------------------------------------------------------------|
 | `(option "name")`                       | the value of the option, by its short or long name without the dashes |
 | `(option "file")`                       | the words of a `:positional` clause, by its name            |
-| `(option "help")`                       | the usage text, as a string, the same text that `--help` prints |
+| `(option "help")`                       | `#t` when `-h` or `--help` was given, `#f` otherwise        |
+| `(option "usage")`                      | the usage text, as a string, the same text that `--help` prints |
 
 Symbols work as names as well, `(option 'name)`. Names that were not defined, with the dashes
 (`(option "-v")`), or an integer raise an error.
@@ -529,7 +529,10 @@ $ prog -s '\-v'                   ; the escape gives the word -v
 
 # Help
 
-`-h` and `--help` are always available. They print the usage table and `(exit 0)`.
+`-h` and `--help` are always available. They are a flag like the others: `parse` does not print or exit,
+it stops reading at `-h`, skips the checks that need the rest (`:required`, the positional words), and
+`(option "help")` is `#t`. `parse-or-exit` is the usual reaction: it prints the usage table and does `(exit 0)`.
+The `$ prog -h` outputs in this document are from a program that reads its command line with `parse-or-exit`.
 Names, argument placeholders and descriptions are aligned, a multi-line description is indented
 under its first line.
 
@@ -551,20 +554,21 @@ Options:
   -h, --help                    show this help message and exit
 ```
 
-`(option "help")` returns this same text as a string, to print it from the program,
-for example `(display (option "help"))`.
+`(option "usage")` returns this same text as a string, to print it from the program, for example
+`(display (option "usage"))`. It is there for any command line, also when `-h` was not given.
 
-The parser takes an optional second argument, the help hook: `(parse arguments on-help)`.
-When `-h` is on the command line, `(on-help usage-text)` is called instead of printing the usage and
-calling `(exit 0)`, and the parse goes on to return the accessor of what came before `-h`.
-It is the way to print the help somewhere else, or to exit with another code, and to test the help
-without intercepting `exit`.
+`(option "help")` is `#t` when `-h` or `--help` was given. A program that wants to print the help
+somewhere else, or to exit with another code, reads it after `parse`:
 
 ```scheme
-(define option
-  (parse (cdr (command-line))
-         (lambda (text) (display text (current-error-port)) (exit 0))))
+(define option (parse (cdr (command-line))))
+(when (option "help")
+  (display (option "usage") (current-error-port))
+  (exit 0))
 ```
+
+`-h` skips the checks that need the rest of the command line, so this works when an option is required and
+missing. A wrong command line raises a condition, see [Errors](#errors).
 
 The placeholder shows the arity: `<int> <int>` for 2, `<string>...` for `(1 +)`, `[<string>...]` for
 `(0 +)`, `[<int>] [<int>]` for `(0 2)`. A custom `:type` procedure is shown as `<value>`.
@@ -572,7 +576,7 @@ The program name is the first element of `(command-line)`, the script as it was 
 (a REPL, `--eval`), `(command-line)` is `("")` and the name is `program`.
 
 There is no place in the usage for a sentence about the program, and no built-in `--version`: the program
-does both with the help hook and a look at its arguments, see [Recipes](#recipes).
+does both with `(option "help")` and a look at its arguments, see [Recipes](#recipes).
 
 # Errors
 
@@ -580,12 +584,12 @@ Problems with the command line raise a `&command-line-error` condition. It is al
 the who `opt-parser`, a message and details, what `(error 'opt-parser message detail ...)` makes: the
 message says what went wrong, and the details are the values it is about, the option name, the text
 that did not fit, and so on. So `error?`, `condition-message` and `condition-irritants` (the R6RS name
-for the details) work on it. The library never exits by itself except for `-h`, and `parse-or-exit` below.
+for the details) work on it. The library never exits by itself, only `parse-or-exit` below does.
 
 | call                              | result                                                  |
 |-----------------------------------|---------------------------------------------------------|
 | `(command-line-error? e)`         | `#t` for the problems of the table below, `#f` for any other condition |
-| `(command-line-error-usage e)`    | the usage text of the parser that raised it, the same text as `(option "help")` |
+| `(command-line-error-usage e)`    | the usage text of the parser that raised it, the same text as `(option "usage")` |
 
 | message                            | when                                                  | details                |
 |------------------------------------|-------------------------------------------------------|------------------------|
@@ -606,8 +610,9 @@ the command line is wrong. A program that only wants the usual reaction uses `pa
 (define option (parse-or-exit parse (cdr (command-line))))
 ```
 
-It returns the accessor, and when the command line is wrong it prints a sentence, a blank line and the
-usage to the error port, and exits with `2`. Other errors are not caught.
+It returns the accessor. At `-h` or `--help` it prints the usage to the output port and exits with `0`, and
+when the command line is wrong it prints a sentence, a blank line and the usage to the error port, and exits
+with `2`. Other errors are not caught.
 
 ```
 $ copy -n abc -i a.txt
@@ -674,9 +679,10 @@ already gives. Each recipe is a complete program, and the output is from real ru
 
 ## A program description and an epilog
 
-The usage has no place for a sentence about the program. The program prints its own text around the usage with
-the help hook, the optional second argument of the parser (see [Help](#help)). The hook receives the usage text
-and decides what to do with it, here print it between two paragraphs and exit.
+The usage has no place for a sentence about the program. The program prints its own text around the usage when
+`(option "help")` says that `-h` was given (see [Help](#help)), and reads `(option "usage")` for the text.
+`parse-or-exit` would print the usage itself at `-h`, so this program calls `parse` and reports a wrong command
+line the same way, with the condition and its usage.
 
 ```scheme
 #!r6rs
@@ -687,15 +693,22 @@ and decides what to do with it, here print it between two paragraphs and exit.
   [:positional "source" :arity (1 +) :description "files to copy"]
   [:positional "dest" :description "where to copy them"])
 
-;; the help hook: print the program's own text around the usage
-(define (show-help usage)
+;; a wrong command line: the message, a blank line and the usage, on the error port; exit 2
+(define option
+  (guard (e [(command-line-error? e)
+             (display (condition-message e) (current-error-port))
+             (newline (current-error-port))
+             (display (command-line-error-usage e) (current-error-port))
+             (exit 2)])
+    (parse (cdr (command-line)))))
+
+;; -h: the program's own text around the usage
+(when (option "help")
   (display "Copy files to a directory.\n\n")
-  (display usage)
+  (display (option "usage"))
   (display "\nExample: cp-lite a.txt b.txt dest/\n")
   (exit 0))
 
-(define option
-  (parse-or-exit (lambda (arguments) (parse arguments show-help)) (cdr (command-line))))
 (write (option "source")) (newline)
 (write (option "dest")) (newline)
 ```
@@ -719,10 +732,23 @@ Example: cp-lite a.txt b.txt dest/
 $ prog a.txt b.txt dest/
 ("a.txt" "b.txt")
 "dest/"
+
+$ prog a.txt
+too few positional arguments
+Usage: prog [options] [--] <source>... <dest>
+
+Arguments:
+  <source>...  files to copy
+  <dest>       where to copy them
+
+Options:
+  -v, --verbose  print each file
+  -h, --help     show this help message and exit
+[exit 2]
 ```
 
-* `parse-or-exit` takes a procedure of the arguments, so the hook is passed in a `lambda`.
-* The text can come from anywhere, a file or a procedure, and the hook can print it to the error port or exit with another code.
+* The text can come from anywhere, a file or a procedure, and the program can print it to the error port or exit with another code.
+* A program that is happy with the usual `-h` uses `parse-or-exit` and writes none of this.
 
 ## `--version`
 
@@ -1155,7 +1181,7 @@ expanded for real, and the parser it defines is run. There are no tests of the i
 | the syntax and the rules of a definition | `check-definition-rows`: a table of definitions with the message of the syntax violation each one has to give, valid definitions are in the same tables so that a rule cannot pass by rejecting everything. `definition-error-form` checks which part of the definition the error points at |
 | the generated code            | the behaviour of the parser it defines: types, arity, `:required`, positionals |
 | the parser at runtime         | command lines in, values and errors out; the specs can also be built by hand with `make-option-ast`, for the converters and the usage |
-| the usage and `-h`            | the exact text; the real `-h` path, which calls `exit`, is exercised on Chez and on Guile |
+| the usage and `-h`            | the exact text; the real `-h` path of `parse-or-exit`, which calls `exit`, is exercised on Chez and on Guile |
 
 A new rule of the definition syntax is one more row in a table, with its message. The message is
 compared as a prefix, so adding a field to the list in "unknown field ... (expected ...)" does not

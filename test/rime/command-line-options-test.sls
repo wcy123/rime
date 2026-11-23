@@ -701,7 +701,7 @@
       (CHECK equal? (condition-irritants e) '("-n" "abc"))))
 
   (define-test test-every-kind-of-command-line-error-carries-the-usage
-    (let ([usage ((parse '()) "help")])
+    (let ([usage ((parse '()) "usage")])
       (for-each
        (lambda (arguments)
          (let ([e (raised (lambda () (parse arguments)))])
@@ -718,24 +718,24 @@
     (let ([e (raised (lambda () (parse-required '())))])
       (CHECK eq? (command-line-error? e) #t)
       (CHECK equal? (condition-message e) "missing required option")
-      (CHECK equal? (command-line-error-usage e) ((parse-required '("-i" "a")) "help"))))
+      (CHECK equal? (command-line-error-usage e) ((parse-required '("-i" "a")) "usage"))))
 
   (define-test test-positional-errors-carry-the-usage
     (let ([few (raised (lambda () (parse-one '())))]
           [many (raised (lambda () (parse-one '("a" "b"))))]
           [none (raised (lambda () (parse-none '("a"))))])
       (CHECK equal? (condition-message few) "too few positional arguments")
-      (CHECK equal? (command-line-error-usage few) ((parse-one '("a")) "help"))
+      (CHECK equal? (command-line-error-usage few) ((parse-one '("a")) "usage"))
       (CHECK equal? (condition-message many) "too many positional arguments")
-      (CHECK equal? (command-line-error-usage many) ((parse-one '("a")) "help"))
+      (CHECK equal? (command-line-error-usage many) ((parse-one '("a")) "usage"))
       (CHECK equal? (condition-message none) "unexpected positional argument")
-      (CHECK equal? (command-line-error-usage none) ((parse-none '()) "help"))))
+      (CHECK equal? (command-line-error-usage none) ((parse-none '()) "usage"))))
 
   (define-test test-a-failing-custom-type-is-a-command-line-error-with-the-usage
     (let ([e (raised (lambda () (strict '("-k" "no"))))])
       (CHECK eq? (command-line-error? e) #t)
       (CHECK equal? (condition-message e) "invalid argument value")
-      (CHECK equal? (command-line-error-usage e) ((strict '("-k" "ok")) "help"))))
+      (CHECK equal? (command-line-error-usage e) ((strict '("-k" "ok")) "usage"))))
 
   (define-test test-errors-that-are-not-about-the-command-line-are-not-command-line-errors
     (let ([option (parse '())])
@@ -824,10 +824,10 @@
     (when run-capturing-exit-and-error
       (CHECK equal? (report-text (lambda () (parse '("-n" "abc"))))
              (string-append prog ": invalid argument \"abc\" for -n\n\n"
-                            ((parse '()) "help")))
+                            ((parse '()) "usage")))
       (CHECK equal? (report-text (lambda () (parse-required '())))
              (string-append prog ": missing required option --input\n\n"
-                            ((parse-required '("-i" "a")) "help")))))
+                            ((parse-required '("-i" "a")) "usage")))))
 
   (define-test test-the-message-and-the-details-of-the-condition-are-not-changed
     (for-each
@@ -846,8 +846,12 @@
       (CHECK equal? (error-message (lambda () (option "z"))) "unknown option")
       (CHECK equal? (error-message (lambda () (option "nope"))) "unknown option")
       (CHECK equal? (error-message (lambda () (option "-n"))) "unknown option")
-      (CHECK equal? (error-message (lambda () (option "--count"))) "unknown option")
-      (CHECK equal? (error-message (lambda () (option "h"))) "unknown option")))
+      (CHECK equal? (error-message (lambda () (option "--count"))) "unknown option")))
+
+  (define-test test-h-is-the-short-name-of-help
+    (CHECK eq? ((parse '()) "h") #f)
+    (CHECK eq? ((parse '("-h")) "h") #t)
+    (CHECK eq? ((parse '("--help")) 'h) #t))
 
   (define-test test-accessor-unknown-option-lists-the-names-that-exist
     (let ([option (parse '())])
@@ -856,8 +860,8 @@
                        "r" "range" "p" "pair" "u" "upper" "o" "opt-list" "args")))
       ;; the first irritant is the key as it was given, a symbol stays a symbol
       (CHECK equal? (car (error-irritants (lambda () (option 'nope)))) 'nope)
-      (CHECK equal? (error-irritants (lambda () (option "h")))
-             (list "h" (cadr (error-irritants (lambda () (option "nope"))))))))
+      (CHECK equal? (error-irritants (lambda () (option "zz")))
+             (list "zz" (cadr (error-irritants (lambda () (option "nope"))))))))
 
   (define-test test-accessor-unknown-name-with-dashes-says-names-have-no-dashes
     (let ([option (parse '())])
@@ -919,9 +923,9 @@
     (CHECK equal? (error-message (lambda () ((parse '()) "nope" 1))) "unknown option")
     (CHECK equal? (error-message (lambda () ((parse '()) 42 1))) "invalid option key"))
 
-  (define-test test-help-ignores-the-default
+  (define-test test-usage-ignores-the-default
     (let ([option (parse '())])
-      (CHECK equal? (option "help" 'x) (option "help"))))
+      (CHECK equal? (option "usage" 'x) (option "usage"))))
 
   (define-test test-no-default-is-as-before
     (let ([option (parse '())])
@@ -1402,13 +1406,11 @@
             "  -h, --help                show this help message and exit\n")))
 
   (define-test test-choices-show-in-the-help-of-a-parser
-    (when run-capturing-exit
-      (let ([result (run-capturing-exit (lambda () (with-choices '("-h"))))])
-        (CHECK eqv? (car result) 0)
-        (CHECK eq? (and (contains? (cdr result) "-f, --format {json,text,yaml}") #t) #t)
-        (CHECK eq? (and (contains? (cdr result) "--level {1,2,4}") #t) #t)
-        (CHECK eq? (and (contains? (cdr result) "-m, --mode {a,b,c}...") #t) #t)
-        (CHECK eq? (and (contains? (cdr result) "--delta {-1,0,1}") #t) #t))))
+    (let ([usage (help-text with-choices)])
+      (CHECK eq? (and (contains? usage "-f, --format {json,text,yaml}") #t) #t)
+      (CHECK eq? (and (contains? usage "--level {1,2,4}") #t) #t)
+      (CHECK eq? (and (contains? usage "-m, --mode {a,b,c}...") #t) #t)
+      (CHECK eq? (and (contains? usage "--delta {-1,0,1}") #t) #t)))
 
   (define-test test-a-flag-next-to-choices-still-works
     (CHECK eq? ((with-choices '("-v" "--format" "json")) "v") #t))
@@ -1489,11 +1491,9 @@
     [:short "-q" :arity 0 :description "quiet"]
     [:short "-u" :long "--upper" :type string-upcase :description "first line\nsecond line"])
 
-  ;; the usage of a parser, as its help hook gets it; the help skips the required options and the words
+  ;; the usage of a parser; -h skips the required options and the words, so any parser gives it
   (define (help-text parser)
-    (let ([shown #f])
-      (parser '("--help") (lambda (text) (set! shown text)))
-      shown))
+    ((parser '("--help")) "usage"))
 
   (define-test test-usage-of-a-parser
     (CHECK string=?
@@ -1559,58 +1559,54 @@
             "Options:\n"
             "  -h, --help  show this help message and exit\n")))
 
-  (define-test test-help-short-calls-handler
-    (let* ([shown #f]
-           [option (usage-parser '("-h") (lambda (text) (set! shown text)))])
-      (CHECK equal? shown (help-text usage-parser))
+  (define-test test-help-short-is-reported
+    (let ([option (usage-parser '("-h"))])
+      (CHECK eq? (option "help") #t)
+      (CHECK equal? (option "usage") (help-text usage-parser))
       (CHECK eq? (option "v") #f)))
 
-  (define-test test-help-long-calls-handler
-    (let ([shown #f])
-      (usage-parser '("-v" "--help") (lambda (text) (set! shown text)))
-      (CHECK eq? (string? shown) #t)))
+  (define-test test-help-long-is-reported
+    (CHECK eq? ((usage-parser '("-v" "--help")) "help") #t))
 
-  (define-test test-help-after-positional-shows-the-usage
-    (let ([shown #f])
-      (usage-parser '("a" "--help") (lambda (text) (set! shown text)))
-      (CHECK eq? (and shown #t) #t)))
+  (define-test test-help-after-positional-is-reported
+    (CHECK eq? ((usage-parser '("a" "--help")) "help") #t))
 
   (define-test test-help-as-option-argument-is-escapable
-    (let* ([shown #f]
-           [option (usage-parser '("-u" "\\-h") (lambda (text) (set! shown text)))])
-      (CHECK eq? shown #f)
+    (let ([option (usage-parser '("-u" "\\-h"))])
+      (CHECK eq? (option "help") #f)
       (CHECK equal? (option "u") "-H")))
 
   ;; ========================================
-  ;; the help hook of the defined parser
+  ;; the help flag of the defined parser
   ;; ========================================
 
-  (define-test test-the-parser-calls-the-help-hook-instead-of-exiting
-    (let* ([shown '()]
-           [option (parse '("-v" "-h" "-n" "5") (lambda (text) (set! shown (cons text shown))))])
-      ;; called once, with the usage text, and the parse goes on to return an accessor
-      (CHECK equal? shown (list ((parse '()) "help")))
+  (define-test test-the-parser-reports-help-instead-of-exiting
+    (let ([option (parse '("-v" "-h" "-n" "5"))])
+      ;; the parse goes on to return an accessor, and the usage is the text of this parser
       (CHECK eq? (procedure? option) #t)
+      (CHECK eq? (option "help") #t)
+      (CHECK equal? (option "usage") ((parse '()) "usage"))
       ;; what came before -h was read, what came after was not
-      (CHECK eq? (and (not (memq (option "v") '(#f absent))) #t) #t)
+      (CHECK eq? (option "v") #t)
       (CHECK equal? (option "n") #f)))
 
-  (define-test test-the-help-hook-is-not-called-when-help-is-not-asked
-    (let ([calls 0])
-      (parse '("-v" "-n" "5") (lambda (text) (set! calls (+ calls 1))))
-      (CHECK eqv? calls 0)))
+  (define-test test-help-is-false-when-help-is-not-asked
+    (CHECK eq? ((parse '("-v" "-n" "5")) "help") #f)
+    (CHECK eq? ((parse '()) "help") #f))
 
-  (define-test test-the-help-hook-skips-the-required-checks
-    (let ([shown #f])
-      (parse-required '("--help") (lambda (text) (set! shown text)))
-      (CHECK eq? (and shown #t) #t)
-      (parse-one '("-h") (lambda (text) (set! shown 'again)))
-      (CHECK eq? shown 'again)))
+  (define-test test-help-skips-the-required-checks
+    (CHECK eq? ((parse-required '("--help")) "help") #t)
+    (CHECK eq? ((parse-one '("-h")) "help") #t))
+
+  (define-test test-help-follows-the-default-rule
+    ;; a default is used when -h was not given, and the flag is the value when it was
+    (CHECK equal? ((parse '()) "help" 'x) 'x)
+    (CHECK eq? ((parse '("-h")) "help" 'x) #t))
 
   (define-test test-the-parser-still-takes-the-arguments-alone
     (CHECK equal? ((parse '("-n" "7")) "n") 7))
 
-  ;; The real -h path of a macro-defined parser prints usage and calls (exit 0).
+  ;; The real -h path of parse-or-exit prints the usage and calls (exit 0).
   ;; exit and the output port are intercepted through eval in an implementation specific
   ;; environment (cf. rime/rime-0/__feature-registry.sls); the test is skipped elsewhere.
   (define (try-environment import-spec)
@@ -1667,29 +1663,29 @@
      "  -f, --files <string>..." (spaces 2) "input files\n"
      "  -h, --help" (spaces 15) "show this help message and exit\n"))
 
-  (define-test test-help-short-prints-usage-and-exits
+  (define-test test-parse-or-exit-short-help-prints-usage-and-exits
     (when run-capturing-exit
-      (let ([result (run-capturing-exit (lambda () (helpful '("-h"))))])
+      (let ([result (run-capturing-exit (lambda () (parse-or-exit helpful '("-h"))))])
         (CHECK eqv? (car result) 0)
         (CHECK string=? (cdr result) helpful-usage))))
 
-  (define-test test-help-long-prints-usage-and-exits
+  (define-test test-parse-or-exit-long-help-prints-usage-and-exits
     (when run-capturing-exit
-      (let ([result (run-capturing-exit (lambda () (helpful '("-v" "--help"))))])
+      (let ([result (run-capturing-exit (lambda () (parse-or-exit helpful '("-v" "--help"))))])
         (CHECK eqv? (car result) 0)
         (CHECK string=? (cdr result) helpful-usage))))
 
   (define-test test-help-stops-parsing
     ;; options after -h are not parsed, so a bad one does not raise
     (when run-capturing-exit
-      (let ([result (run-capturing-exit (lambda () (helpful '("-h" "--nope"))))])
+      (let ([result (run-capturing-exit (lambda () (parse-or-exit helpful '("-h" "--nope"))))])
         (CHECK eqv? (car result) 0))))
 
   (define-command-line-options takes-words [:positional "words" :arity (0 +)])
 
   (define-test test-help-after-double-dash-does-not-exit
     (when run-capturing-exit
-      (let ([result (run-capturing-exit (lambda () (takes-words '("--" "-h"))))])
+      (let ([result (run-capturing-exit (lambda () (parse-or-exit takes-words '("--" "-h"))))])
         (CHECK eq? (car result) 'exit-not-called)
         (CHECK equal? (cdr result) ""))))
 
@@ -1744,7 +1740,7 @@
         (CHECK equal? (cadr result) "")
         (CHECK equal? (caddr result)
                (string-append prog ": invalid argument \"abc\" for -n\n\n"
-                              ((parse '()) "help"))))
+                              ((parse '()) "usage"))))
       (let ([result (run-capturing-exit-and-error (lambda () (parse-or-exit parse-one '())))])
         (CHECK eqv? (car result) 2)
         (CHECK eq? (contains? (caddr result) "missing positional argument <file>") #t)
@@ -1755,7 +1751,7 @@
       (CHECK equal? (condition-message e) "a bug")
       (CHECK eq? (command-line-error? e) #f)))
 
-  (define-test test-parse-or-exit-keeps-the-help-exit-of-the-parser
+  (define-test test-parse-or-exit-prints-the-usage-to-the-output-port
     (when run-capturing-exit-and-error
       (let ([result (run-capturing-exit-and-error (lambda () (parse-or-exit helpful '("-h"))))])
         (CHECK eqv? (car result) 0)
@@ -1848,14 +1844,14 @@
   (define-test test-mixed-undefined-dash-word-after-positional
     (CHECK equal? ((parse-mixed '("f" "--nope")) "files") '("f" "--nope")))
   ;; ========================================
-  ;; (option 'help), the usage as a string
+  ;; (option 'usage), the usage as a string
   ;; ========================================
 
   (define-command-line-options parse-small
     [:short "-v" :long "--verbose" :arity 0 :description "verbose output"])
 
   (define-test test-help-key-returns-the-usage
-    (CHECK equal? ((parse-small '()) 'help)
+    (CHECK equal? ((parse-small '()) 'usage)
            (string-append "Usage: " prog " [options]\n"
                           "\n"
                           "Options:\n"
@@ -1863,11 +1859,11 @@
                           "  -h, --help     show this help message and exit\n")))
 
   (define-test test-help-key-is-the-same-text-as-the-help-option
-    (CHECK equal? ((usage-parser '()) 'help) (help-text usage-parser)))
+    (CHECK equal? ((usage-parser '()) 'usage) (help-text usage-parser)))
 
   (define-test test-help-key-does-not-start-the-help
-    (CHECK eq? (string? ((parse '("-v")) 'help)) #t)
-    (CHECK eq? (contains? ((parse '()) 'help) "--count") #t))
+    (CHECK eq? (string? ((parse '("-v")) 'usage)) #t)
+    (CHECK eq? (contains? ((parse '()) 'usage) "--count") #t))
 
   ;; ========================================
   ;; :required, it is an error when the option is absent
@@ -1975,10 +1971,10 @@
     (CHECK equal? (error-irritants (lambda () ((parse-names '()) "nope")))
            '("nope" ("emit" "v" "level"))))
 
-  (define-test test-help-is-an-option-name
+  (define-test test-usage-is-an-option-name
     (let ([option (parse-small '())])
-      (CHECK equal? (option "help") (option 'help))
-      (CHECK eq? (contains? (option "help") "--verbose") #t)))
+      (CHECK equal? (option "usage") (option 'usage))
+      (CHECK eq? (contains? (option "usage") "--verbose") #t)))
 
   (define-test test-syntax-error-short-and-long-name-of-different-options-clash
     (CHECK eq? (syntax-error?
@@ -2074,7 +2070,7 @@
     [:positional "file" :arity (1 +) :description "files to read"])
 
   (define-test test-usage-lists-the-positional
-    (CHECK equal? ((parse-documented '("a")) 'help)
+    (CHECK equal? ((parse-documented '("a")) 'usage)
            (string-append "Usage: " prog " [options] [--] <file>...\n"
                           "\n"
                           "Arguments:\n"
@@ -2114,7 +2110,7 @@
     [:short "-q" :arity 0 :description "quiet"])
 
   (define-test test-metavar-replaces-the-type-in-the-usage
-    (CHECK equal? ((parse-metavar '()) 'help)
+    (CHECK equal? ((parse-metavar '()) 'usage)
            (string-append "Usage: " prog " [options]\n"
                           "\n"
                           "Options:\n"
@@ -2137,7 +2133,7 @@
     [:long "--format" :metavar "fmt" :choices ("json" "text") :description "output format"])
 
   (define-test test-metavar-replaces-the-choices-in-the-usage-and-they-are-still-checked
-    (CHECK equal? ((parse-metavar-choices '()) 'help)
+    (CHECK equal? ((parse-metavar-choices '()) 'usage)
            (string-append "Usage: " prog " [options]\n"
                           "\n"
                           "Options:\n"
@@ -2529,7 +2525,7 @@
     (CHECK eq? (string? (help-text parse-cp)) #t))
 
   (define-test test-usage-lists-every-positional
-    (CHECK equal? ((parse-cp '("a" "b")) 'help)
+    (CHECK equal? ((parse-cp '("a" "b")) 'usage)
            (string-append "Usage: " prog " [options] [--] <source>... <dest>\n"
                           "\n"
                           "Arguments:\n"
@@ -2541,7 +2537,7 @@
                           "  -h, --help  show this help message and exit\n")))
 
   (define-test test-usage-of-exact-and-optional-positionals
-    (CHECK equal? ((parse-sandwich '("a" "z")) 'help)
+    (CHECK equal? ((parse-sandwich '("a" "z")) 'usage)
            (string-append "Usage: " prog " [options] [--] <first> [<middle>...] <last>\n"
                           "\n"
                           "Arguments:\n"
@@ -2553,7 +2549,7 @@
                           "  -h, --help  show this help message and exit\n")))
 
   (define-test test-usage-of-a-positional-with-an-exact-arity-above-one
-    (CHECK equal? ((parse-bounded '("a" "b")) 'help)
+    (CHECK equal? ((parse-bounded '("a" "b")) 'usage)
            (string-append "Usage: " prog " [options] [--] <x> <x> [<y>] [<y>]\n"
                           "\n"
                           "Arguments:\n"
@@ -2567,7 +2563,7 @@
   ;; the recipes of the doc: what a program does with what the library gives
   ;; ========================================
 
-  ;; the help hook: the program's own text around the usage
+  ;; help: the program's own text around the usage
   (define-command-line-options recipe-copy
     [:short "-v" :long "--verbose" :arity 0 :description "print each file"]
     [:positional "source" :arity (1 +) :description "files to copy"]
@@ -2576,9 +2572,9 @@
   (define (recipe-help-text usage)
     (string-append "Copy files to a directory.\n\n" usage "\nExample: cp-lite a.txt b.txt dest/\n"))
 
-  (define-test test-recipe-help-hook-puts-text-around-the-usage
-    (let ([shown #f])
-      (recipe-copy '("-h") (lambda (usage) (set! shown (recipe-help-text usage))))
+  (define-test test-recipe-help-puts-text-around-the-usage
+    (let* ([option (recipe-copy '("-h"))]
+           [shown (and (option "help") (recipe-help-text (option "usage")))])
       (CHECK eq? (and (starts-with? shown "Copy files to a directory.\n\nUsage: ") #t) #t)
       (CHECK eq? (contains? shown "  -v, --verbose  print each file\n") #t)
       (CHECK eq? (contains? shown "\nExample: cp-lite a.txt b.txt dest/\n") #t)))
@@ -2672,7 +2668,7 @@
     (CHECK eqv? ((recipe-verbose '("-v" "3")) "verbose" 0) 3)
     (CHECK eqv? ((recipe-verbose '("--verbose=2")) "verbose" 0) 2)
     (CHECK equal? (error-message (lambda () (recipe-verbose '("-v")))) "too few arguments for option")
-    (CHECK eq? (contains? ((recipe-verbose '()) "help") "-v, --verbose <level>") #t))
+    (CHECK eq? (contains? ((recipe-verbose '()) "usage") "-v, --verbose <level>") #t))
 
   ;; the compact short forms are ordinary words: write -j 4 and -v -q
   (define-command-line-options recipe-short-forms
@@ -2787,10 +2783,12 @@
        ("option name is defined twice" [:short "-a" :long "--x"] [:short "-b" :long "--x"])
        ("option name is defined twice" [:short "-x"] [:long "--x"])
        ("option name is defined twice" [:long "--x"] [:short "-x"])
-       ("-h and --help are reserved for the built-in help" [:short "-h"])
-       ("-h and --help are reserved for the built-in help" [:long "--help"])
-       ("-h and --help are reserved for the built-in help" [:short "-a" :long "--help"])
-       ("-h and --help are reserved for the built-in help" [:long "--h"])
+       ("-h, --help and the name usage are reserved for the built-in help" [:short "-h"])
+       ("-h, --help and the name usage are reserved for the built-in help" [:long "--help"])
+       ("-h, --help and the name usage are reserved for the built-in help" [:short "-a" :long "--help"])
+       ("-h, --help and the name usage are reserved for the built-in help" [:long "--h"])
+       ("-h, --help and the name usage are reserved for the built-in help" [:long "--usage"])
+       ("-h, --help and the name usage are reserved for the built-in help" [:short "-usage"])
        (#f [:short "-a"] [:short "-b"] [:long "--c"])
        (#f [:short "-emit" :long "--emit"] [:short "-opt" :long "--opt"]))))
 
@@ -2930,8 +2928,9 @@
        (":short is a field of an option, not of a :positional clause" [:positional "a" :short "-a"])
        (":long is a field of an option, not of a :positional clause" [:positional "a" :long "--aa"])
        (":required is a field of an option, not of a :positional clause" [:positional "a" :required])
-       ("-h and --help are reserved for the built-in help" [:positional "h"])
-       ("-h and --help are reserved for the built-in help" [:positional "help"])
+       ("-h, --help and the name usage are reserved for the built-in help" [:positional "h"])
+       ("-h, --help and the name usage are reserved for the built-in help" [:positional "help"])
+       ("-h, --help and the name usage are reserved for the built-in help" [:positional "usage"])
        ("positional name clashes with an option name" [:short "-v" :arity 0] [:positional "v"])
        ("positional name clashes with an option name" [:long "--file"] [:positional "file"])
        ("positional name clashes with an option name" [:positional "emit"] [:short "-emit" :long "--emit"])
