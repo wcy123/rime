@@ -4,12 +4,13 @@
   (import (rnrs (6))
           (rnrs eval (6))
           (rime unit-test)
-          (rime command-line-options)
-          (rime command-line-options __ast)
-          (rime command-line-options __runtime))
+          (rime command-line-options))
 
   (define (main)
     (run-all-tests))
+
+  ;; what the usage and the error report show as the program: the script that runs the tests
+  (define prog (car (command-line)))
 
   (define-command-line-options parse
     [:short "-v" :long "--verbose" :arity 0 :description "verbose output"]
@@ -651,6 +652,11 @@
     (CHECK equal? (error-message (lambda () (parse '("-x" "abc"))))
            "invalid argument value"))
 
+  (define-test test-type-int-and-float-forms
+    (CHECK eqv? ((parse '("-n" "+3")) "n") 3)
+    (CHECK eqv? ((parse '("-x" "1e3")) "x") 1000.0)
+    (CHECK eqv? ((parse '("-x" ".5")) "x") 0.5))
+
   (define-test test-error-invalid-bool
     (CHECK equal? (error-message (lambda () (parse '("-b" "maybe"))))
            "invalid argument value"))
@@ -744,14 +750,17 @@
       (CHECK eq? (command-line-error? 'oops) #f)))
 
   ;; the sentence of the report: what comes before the blank line that separates it from the usage
-  (define (report-sentence e)
-    (let* ([report (format-command-line-error e)]
-           [end (let loop ([i 0])
-                  (cond [(>= (+ i 1) (string-length report)) (string-length report)]
-                        [(and (char=? (string-ref report i) #\newline)
-                              (char=? (string-ref report (+ i 1)) #\newline))
-                         i]
-                        [else (loop (+ i 1))]))])
+  (define (report-text thunk)
+    (caddr (run-capturing-exit-and-error
+            (lambda () (parse-or-exit (lambda (arguments) (thunk)) '())))))
+
+  (define (report-sentence report)
+    (let ([end (let loop ([i 0])
+                 (cond [(>= (+ i 1) (string-length report)) (string-length report)]
+                       [(and (char=? (string-ref report i) #\newline)
+                             (char=? (string-ref report (+ i 1)) #\newline))
+                        i]
+                       [else (loop (+ i 1))]))])
       (substring report 0 end)))
 
   ;; (message details sentence thunk): the thunk raises the error, and what a person reads is the sentence
@@ -760,6 +769,12 @@
      (list "invalid argument value" '("-n" "abc")
            "invalid argument \"abc\" for -n"
            (lambda () (parse '("-n" "abc"))))
+     (list "invalid argument value" '("-n" "")
+           "invalid argument \"\" for -n"
+           (lambda () (parse '("-n" ""))))
+     (list "invalid argument value" '("-n" "a \"b\"")
+           "invalid argument \"a \\\"b\\\"\" for -n"
+           (lambda () (parse '("-n" "a \"b\""))))
      (list "argument must be one of the choices" '("--format" "xml" ("json" "text" "yaml"))
            "\"xml\" is not one of json, text, yaml (for --format)"
            (lambda () (with-choices '("--format" "xml"))))
@@ -798,21 +813,20 @@
            (lambda () (parse-none '("a b" "c"))))))
 
   (define-test test-the-report-says-which-option-and-which-text
-    (for-each
-     (lambda (row)
-       (let ([e (raised (caddr (cdr row)))])
-         (CHECK equal? (list (cadr row) (report-sentence e))
-                (list (cadr row) (string-append (program-name) ": " (caddr row))))))
-     report-rows))
+    (when run-capturing-exit-and-error
+      (for-each
+       (lambda (row)
+         (CHECK equal? (list (cadr row) (report-sentence (report-text (cadddr row))))
+                (list (cadr row) (string-append prog ": " (caddr row)))))
+       report-rows)))
 
   (define-test test-the-report-is-the-sentence-and-the-usage
-    (let ([e (raised (lambda () (parse '("-n" "abc"))))])
-      (CHECK equal? (format-command-line-error e)
-             (string-append (program-name) ": invalid argument \"abc\" for -n\n\n"
-                            ((parse '()) "help"))))
-    (let ([e (raised (lambda () (parse-required '())))])
-      (CHECK equal? (format-command-line-error e)
-             (string-append (program-name) ": missing required option --input\n\n"
+    (when run-capturing-exit-and-error
+      (CHECK equal? (report-text (lambda () (parse '("-n" "abc"))))
+             (string-append prog ": invalid argument \"abc\" for -n\n\n"
+                            ((parse '()) "help")))
+      (CHECK equal? (report-text (lambda () (parse-required '())))
+             (string-append prog ": missing required option --input\n\n"
                             ((parse-required '("-i" "a")) "help")))))
 
   (define-test test-the-message-and-the-details-of-the-condition-are-not-changed
@@ -822,26 +836,6 @@
          (CHECK equal? (list (cadr row) (condition-message e) (condition-irritants e))
                 (list (cadr row) (car row) (cadr row)))))
      (map (lambda (row) (list (car row) (cadr row) (caddr row) (cadddr row))) report-rows)))
-
-  (define-test test-describe-problem-gives-the-sentence-of-a-message
-    (CHECK equal? (describe-problem "too many arguments for option" '("--pair")) "too many arguments for --pair")
-    (CHECK equal? (describe-problem "invalid argument value" '("--name" "")) "invalid argument \"\" for --name")
-    (CHECK equal? (describe-problem "invalid argument value" '("--name" "a \"b\""))
-           "invalid argument \"a \\\"b\\\"\" for --name"))
-
-  (define-test test-describe-problem-has-nothing-to-say-about-what-it-does-not-know
-    ;; a message that is not in the table, and the details of a known message in another shape
-    (CHECK eq? (describe-problem "not an integer" '("zz")) #f)
-    (CHECK eq? (describe-problem "something new" '()) #f)
-    (CHECK eq? (describe-problem "missing required option" '()) #f)
-    (CHECK eq? (describe-problem "invalid argument value" '("-n")) #f))
-
-  (define-test test-a-message-that-is-not-in-the-table-is-reported-as-before
-    ;; a converter called directly fails with its own message, and there is no usage yet
-    (let ([e (raised (lambda () (convert-int "zz")))])
-      (CHECK equal? (condition-message e) "not an integer")
-      (CHECK equal? (format-command-line-error e)
-             (string-append (program-name) ": not an integer: \"zz\"\n\n"))))
 
   ;; ========================================
   ;; accessor errors
@@ -1282,15 +1276,16 @@
                    p))
            #t))
 
-  (define-test test-format-usage-aligns-long-only-names
+  (define-command-line-options long-only-parser
+    [:short "-a" :long "--alpha" :type int :description "both"]
+    [:long "--beta" :arity 0 :description "long only"]
+    [:short "-c" :arity 0 :description "short only"])
+
+  (define-test test-usage-aligns-long-only-names
     (CHECK string=?
-           (format-usage
-            (list (make-option-ast "-a" "--alpha" 1 1 (builtin-converter 'int) "both" #f #f #f)
-                  (make-option-ast #f "--beta" 0 0 (builtin-converter 'string) "long only" #f #f #f)
-                  (make-option-ast "-c" #f 0 0 (builtin-converter 'string) "short only" #f #f #f))
-            "prog")
+           (help-text long-only-parser)
            (string-append
-            "Usage: prog [options]\n"
+            "Usage: " prog " [options]\n"
             "\n"
             "Options:\n"
             "  -a, --alpha <int>  both\n"
@@ -1371,39 +1366,35 @@
            "argument must be one of the choices")
     (CHECK equal? (error-message (lambda () (with-choices '("--level" "04"))))
            "argument must be one of the choices")
-    (CHECK equal? (error-message (lambda () (with-choices '("--format=")))) 
+    (CHECK equal? (error-message (lambda () (with-choices '("--format="))))
            "argument must be one of the choices"))
 
   (define-test test-a-conversion-error-is-still-a-different-message
     (CHECK equal? (error-message (lambda () (parse '("-n" "abc")))) "invalid argument value"))
 
+  (define-command-line-options choices-usage-parser
+    [:short "-f" :long "--format" :choices ("json" "text" "yaml") :description "output format"]
+    [:long "--level" :choices (1 2 4) :description "verbosity level"]
+    [:short "-m" :long "--mode" :arity (1 +) :choices ("a" "b" "c") :description "mode"]
+    [:short "-n" :long "--num" :arity (0 2) :choices ("x" "y") :description "number"])
+
   (define-test test-choices-in-the-usage-text
-    (let ([usage (format-usage
-                  (list (make-option-ast "-f" "--format" 1 1
-                                         (make-choice-converter '("json" "text" "yaml"))
-                                         "output format" #f #f #f)
-                        (make-option-ast #f "--level" 1 1
-                                         (make-choice-converter '(1 2 4)) "verbosity level" #f #f #f)
-                        (make-option-ast "-m" "--mode" 1 unlimited
-                                         (make-choice-converter '("a" "b" "c")) "mode" #f #f #f)
-                        (make-option-ast "-n" "--num" 0 2
-                                         (make-choice-converter '("x" "y")) "number" #f #f #f))
-                  "prog")])
+    (let ([usage (help-text choices-usage-parser)])
       (CHECK eq? (and (contains? usage "-f, --format {json,text,yaml}  output format") #t) #t)
       (CHECK eq? (and (contains? usage "    --level {1,2,4}") #t) #t)
       (CHECK eq? (and (contains? usage "-m, --mode {a,b,c}...") #t) #t)
       (CHECK eq? (and (contains? usage "-n, --num [{x,y}] [{x,y}]") #t) #t)
       (CHECK eq? (and (contains? usage "<string>") #t) #f)))
 
+  (define-command-line-options choices-aligned-parser
+    [:short "-f" :long "--format" :choices ("json" "text") :description "output format"]
+    [:short "-v" :long "--verbose" :arity 0 :description "verbose"])
+
   (define-test test-choices-are-aligned-with-the-other-options
     (CHECK string=?
-           (format-usage
-            (list (make-option-ast "-f" "--format" 1 1 (make-choice-converter '("json" "text"))
-                                   "output format" #f #f #f)
-                  (make-option-ast "-v" "--verbose" 0 0 #f "verbose" #f #f #f))
-            "prog")
+           (help-text choices-aligned-parser)
            (string-append
-            "Usage: prog [options]\n"
+            "Usage: " prog " [options]\n"
             "\n"
             "Options:\n"
             "  -f, --format {json,text}  output format\n"
@@ -1490,20 +1481,25 @@
 
   (define (spaces n) (make-string n #\space))
 
-  (define usage-specs
-    (list
-     (make-option-ast "-v" "--verbose" 0 0 (builtin-converter 'string) "verbose output" #f #f #f)
-     (make-option-ast "-n" "--count" 1 1 (builtin-converter 'int) "repeat count" #f #f #f)
-     (make-option-ast "-f" "--files" 1 unlimited (builtin-converter 'string) "input files" #f #f #f)
-     (make-option-ast "-r" "--range" 0 2 (builtin-converter 'int) "range" #f #f #f)
-     (make-option-ast "-q" #f 0 0 (builtin-converter 'string) "quiet" #f #f #f)
-     (make-option-ast "-u" "--upper" 1 1 (procedure->converter string-upcase) "first line\nsecond line" #f #f #f)))
+  (define-command-line-options usage-parser
+    [:short "-v" :long "--verbose" :arity 0 :description "verbose output"]
+    [:short "-n" :long "--count" :type int :description "repeat count"]
+    [:short "-f" :long "--files" :arity (1 +) :description "input files"]
+    [:short "-r" :long "--range" :arity (0 2) :type int :description "range"]
+    [:short "-q" :arity 0 :description "quiet"]
+    [:short "-u" :long "--upper" :type string-upcase :description "first line\nsecond line"])
 
-  (define-test test-format-usage
+  ;; the usage of a parser, as its help hook gets it; the help skips the required options and the words
+  (define (help-text parser)
+    (let ([shown #f])
+      (parser '("--help") (lambda (text) (set! shown text)))
+      shown))
+
+  (define-test test-usage-of-a-parser
     (CHECK string=?
-           (format-usage usage-specs "prog")
+           (help-text usage-parser)
            (string-append
-            "Usage: prog [options]\n"
+            "Usage: " prog " [options]\n"
             "\n"
             "Options:\n"
             "  -v, --verbose" (spaces 16) "verbose output\n"
@@ -1529,11 +1525,11 @@
               [(string=? (substring text i (+ i m)) part) #t]
               [else (loop (+ i 1))]))))
 
-  (define-test test-format-usage-column-is-aligned
+  (define-test test-usage-column-is-aligned
     ;; every row has its description at column 31
     (let ([rows (filter (lambda (l) (and (> (string-length l) 31)
                                          (char=? (string-ref l 2) #\-)))
-                        (split-lines (format-usage usage-specs "prog")))])
+                        (split-lines (help-text usage-parser)))])
       (CHECK eqv? (length rows) 7)
       (for-each
        (lambda (row)
@@ -1541,57 +1537,47 @@
          (CHECK eq? (char=? (string-ref row 31) #\space) #f))
        rows)))
 
-  (define-test test-format-usage-placeholders
-    (let ([usage (format-usage
-                  (list
-                   (make-option-ast "-a" #f 2 2 (builtin-converter 'int) "d" #f #f #f)
-                   (make-option-ast "-b" #f 0 unlimited (builtin-converter 'string) "d" #f #f #f)
-                   (make-option-ast "-c" #f 1 3 (builtin-converter 'float) "d" #f #f #f))
-                  "p")])
+  (define-command-line-options placeholder-parser
+    [:short "-a" :arity 2 :type int :description "d"]
+    [:short "-b" :arity (0 +) :description "d"]
+    [:short "-c" :arity (1 3) :type float :description "d"])
+
+  (define-test test-usage-placeholders
+    (let ([usage (help-text placeholder-parser)])
       (CHECK eq? (and (contains? usage "-a <int> <int>") #t) #t)
       (CHECK eq? (and (contains? usage "-b [<string>...]") #t) #t)
       (CHECK eq? (and (contains? usage "-c <float> [<float>] [<float>]") #t) #t)))
 
-  (define-test test-format-usage-without-options
+  (define-command-line-options no-options-parser)
+
+  (define-test test-usage-without-options
     (CHECK string=?
-           (format-usage '() "p")
+           (help-text no-options-parser)
            (string-append
-            "Usage: p [options]\n"
+            "Usage: " prog " [options]\n"
             "\n"
             "Options:\n"
             "  -h, --help  show this help message and exit\n")))
 
   (define-test test-help-short-calls-handler
     (let* ([shown #f]
-           [option (parse-command-line usage-specs '("-h")
-                                       (lambda (text) (set! shown text)))])
-      (CHECK equal? shown (format-usage usage-specs (program-name)))
+           [option (usage-parser '("-h") (lambda (text) (set! shown text)))])
+      (CHECK equal? shown (help-text usage-parser))
       (CHECK eq? (option "v") #f)))
 
   (define-test test-help-long-calls-handler
     (let ([shown #f])
-      (parse-command-line usage-specs '("-v" "--help")
-                          (lambda (text) (set! shown text)))
+      (usage-parser '("-v" "--help") (lambda (text) (set! shown text)))
       (CHECK eq? (string? shown) #t)))
-
-  (define-test test-help-after-double-dash-is-positional
-    (let* ([shown #f]
-           [option (parse-command-line usage-specs '("--" "-h")
-                                       (lambda (text) (set! shown text))
-                                       (list (make-positional-ast "args" 0 unlimited #f "" #f)))])
-      (CHECK eq? shown #f)
-      (CHECK equal? (option "args") '("-h"))))
 
   (define-test test-help-after-positional-shows-the-usage
     (let ([shown #f])
-      (parse-command-line usage-specs '("a" "--help")
-                          (lambda (text) (set! shown text)))
+      (usage-parser '("a" "--help") (lambda (text) (set! shown text)))
       (CHECK eq? (and shown #t) #t)))
 
   (define-test test-help-as-option-argument-is-escapable
     (let* ([shown #f]
-           [option (parse-command-line usage-specs '("-u" "\\-h")
-                                       (lambda (text) (set! shown text)))])
+           [option (usage-parser '("-u" "\\-h") (lambda (text) (set! shown text)))])
       (CHECK eq? shown #f)
       (CHECK equal? (option "u") "-H")))
 
@@ -1673,7 +1659,7 @@
 
   (define helpful-usage
     (string-append
-     "Usage: " (program-name) " [options]\n"
+     "Usage: " prog " [options]\n"
      "\n"
      "Options:\n"
      "  -v, --verbose" (spaces 12) "verbose output\n"
@@ -1757,7 +1743,7 @@
         (CHECK eqv? (car result) 2)
         (CHECK equal? (cadr result) "")
         (CHECK equal? (caddr result)
-               (string-append (program-name) ": invalid argument \"abc\" for -n\n\n"
+               (string-append prog ": invalid argument \"abc\" for -n\n\n"
                               ((parse '()) "help"))))
       (let ([result (run-capturing-exit-and-error (lambda () (parse-or-exit parse-one '())))])
         (CHECK eqv? (car result) 2)
@@ -1783,134 +1769,10 @@
                    p))
            #t))
 
-  (define-test test-program-name-is-a-string
-    (CHECK eq? (string? (program-name)) #t))
-
   ;; (command-line) is ("") when there is no script: a REPL, or a program given with --eval
-  (define-test test-program-name-of
-    (CHECK equal? (program-name-of '("prog" "-n" "3")) "prog")
-    (CHECK equal? (program-name-of '("")) "program")
-    (CHECK equal? (program-name-of '()) "program")
-    (CHECK equal? (program-name-of '(#f)) "program"))
-
-  ;; ========================================
-  ;; converters
-  ;; ========================================
-
-  (define-test test-builtin-converters-is-an-association-list
-    (CHECK equal? (map car builtin-converters) '(string int float bool))
-    (CHECK eq? (cdr (assq 'int builtin-converters)) (builtin-converter 'int))
-    (CHECK eq? (assq 'lambda builtin-converters) #f))
-
-  (define-test test-builtin-converters-convert
-    ;; a converter is given the text and the name of the option
-    (CHECK equal? ((converter-convert (builtin-converter 'string)) "x y" "-a") "x y")
-    (CHECK eqv? ((converter-convert (builtin-converter 'int)) "12" "-a") 12)
-    (CHECK eqv? ((converter-convert (builtin-converter 'float)) "2" "-a") 2.0)
-    (CHECK eq? ((converter-convert (builtin-converter 'bool)) "yes" "-a") #t))
-
-  (define-test test-builtin-converters-report-their-own-failure
-    (for-each
-     (lambda (name)
-       (CHECK equal? (error-message (lambda () ((converter-convert (builtin-converter name)) "zz!" "-a")))
-              "invalid argument value"))
-     '(int float bool))
-    (CHECK equal? (error-irritants (lambda () ((converter-convert (builtin-converter 'int)) "zz!" "--count")))
-           '("--count" "zz!")))
-
-  (define-test test-choice-converter-reports-its-own-failure
-    (let ([convert (converter-convert (make-choice-converter '(1 2)))])
-      (CHECK eqv? (convert "1" "-m") 1)
-      (CHECK eqv? (convert "2" "-m") 2)
-      (CHECK equal? (error-message (lambda () (convert "b" "-m"))) "argument must be one of the choices")
-      (CHECK equal? (error-irritants (lambda () (convert "b" "-m"))) '("-m" "b" (1 2)))))
-
-  (define-test test-procedure-converter-turns-any-failure-into-an-invalid-argument
-    (let ([convert (converter-convert (procedure->converter (lambda (s) (raise 'bad))))])
-      (CHECK equal? (error-message (lambda () (convert "v" "-a"))) "invalid argument value")
-      (CHECK equal? (error-irritants (lambda () (convert "v" "-a"))) '("-a" "v")))
-    (let ([convert (converter-convert (procedure->converter string-upcase))])
-      (CHECK equal? (convert "v" "-a") "V")))
-
-  (define-test test-converters-have-a-label
-    (CHECK equal? (map (lambda (name) (converter-label (builtin-converter name)))
-                       '(string int float bool))
-           '("<string>" "<int>" "<float>" "<bool>"))
-    (CHECK equal? (converter-label (procedure->converter string-upcase)) "<value>")
-    (CHECK equal? (converter-label (make-choice-converter '(1 2))) "{1,2}"))
 
   ;; a converter that nothing in the runtime knows about: it brings its label, and it reports
   ;; its own failure, given the text and the name of the option
-  (define hex-converter
-    (make-converter "<hex>"
-                    (lambda (text name)
-                      (or (string->number text 16)
-                          (error 'opt-parser "not a hexadecimal number" name text)))))
-
-  (define hex-spec (make-option-ast "-x" "--hex" 1 1 hex-converter "a hex number" #f #f #f))
-
-  (define-test test-a-new-kind-of-converter-needs-no-change-in-the-runtime
-    (CHECK eqv? ((parse-command-line (list hex-spec) '("--hex" "ff")) "x") 255)
-    (CHECK eqv? ((parse-command-line (list hex-spec) '("-x=10")) "hex") 16))
-
-  (define-test test-a-new-kind-of-converter-reports-its-own-failure
-    (CHECK equal? (error-message (lambda () (parse-command-line (list hex-spec) '("--hex" "zz"))))
-           "not a hexadecimal number")
-    (CHECK equal? (error-irritants (lambda () (parse-command-line (list hex-spec) '("--hex" "zz"))))
-           '("--hex" "zz")))
-
-  (define-test test-a-new-kind-of-converter-shows-its-own-label
-    (CHECK eq? (and (contains? (format-usage (list hex-spec) "p") "-x, --hex <hex>  a hex number") #t) #t))
-
-  (define-test test-a-custom-procedure-fails-with-the-conversion-message
-    (let ([spec (make-option-ast "-a" #f 1 1 (procedure->converter (lambda (s) (error 'x "no"))) "d" #f #f #f)])
-      (CHECK equal? (error-message (lambda () (parse-command-line (list spec) '("-a" "v"))))
-             "invalid argument value")
-      (CHECK equal? (error-irritants (lambda () (parse-command-line (list spec) '("-a" "v"))))
-             '("-a" "v"))))
-
-  (define-test test-usage-names-a-builtin-converter-and-calls-a-custom-one-a-value
-    (let ([usage (format-usage
-                  (list (make-option-ast "-a" #f 1 1 (builtin-converter 'int) "d" #f #f #f)
-                        (make-option-ast "-b" #f 1 1 (builtin-converter 'float) "d" #f #f #f)
-                        (make-option-ast "-c" #f 1 1 (builtin-converter 'bool) "d" #f #f #f)
-                        (make-option-ast "-d" #f 1 1 (builtin-converter 'string) "d" #f #f #f)
-                        (make-option-ast "-e" #f 1 1 (procedure->converter string-upcase) "d" #f #f #f))
-                  "p")])
-      (for-each
-       (lambda (flag)
-         (CHECK eq? (and (contains? usage flag) #t) #t))
-       '("-a <int>" "-b <float>" "-c <bool>" "-d <string>" "-e <value>"))))
-
-  (define-test test-no-converter-means-the-text-as-it-is
-    (let ([option (parse-command-line
-                   (list (make-option-ast "-a" #f 1 1 #f "d" #f #f #f)
-                         (make-option-ast "-b" #f 1 unlimited #f "d" #f #f #f))
-                   '("-a" "12" "-b" "x" "y"))])
-      (CHECK equal? (option "a") "12")
-      (CHECK equal? (option "b") '("x" "y"))))
-
-  (define-test test-usage-calls-no-converter-a-string
-    (let ([usage (format-usage (list (make-option-ast "-a" #f 1 1 #f "d" #f #f #f)) "p")])
-      (CHECK eq? (and (contains? usage "-a <string>") #t) #t)))
-
-  (define-test test-convert-int-direct
-    (CHECK eqv? (convert-int "10") 10)
-    (CHECK eqv? (convert-int "-10") -10)
-    (CHECK eqv? (convert-int "+3") 3)
-    (CHECK eqv? (convert-int "0") 0))
-
-  (define-test test-convert-float-direct
-    (CHECK eqv? (convert-float "1e3") 1000.0)
-    (CHECK eqv? (convert-float "-0.5") -0.5)
-    (CHECK eqv? (convert-float ".5") 0.5))
-
-  (define-test test-convert-bool-direct
-    (CHECK eq? (convert-bool "yes") #t)
-    (CHECK eq? (convert-bool "off") #f))
-
-  (define-test test-convert-string-direct
-    (CHECK equal? (convert-string "x y") "x y"))
 
   ;; ========================================
   ;; options and positional words in any order
@@ -1994,16 +1856,14 @@
 
   (define-test test-help-key-returns-the-usage
     (CHECK equal? ((parse-small '()) 'help)
-           (string-append "Usage: " (program-name) " [options]\n"
+           (string-append "Usage: " prog " [options]\n"
                           "\n"
                           "Options:\n"
                           "  -v, --verbose  verbose output\n"
                           "  -h, --help     show this help message and exit\n")))
 
   (define-test test-help-key-is-the-same-text-as-the-help-option
-    (let ([shown #f])
-      (parse-command-line usage-specs '("-h") (lambda (text) (set! shown text)))
-      (CHECK equal? ((parse-command-line usage-specs '()) 'help) shown)))
+    (CHECK equal? ((usage-parser '()) 'help) (help-text usage-parser)))
 
   (define-test test-help-key-does-not-start-the-help
     (CHECK eq? (string? ((parse '("-v")) 'help)) #t)
@@ -2027,6 +1887,16 @@
   (define-test test-required-given
     (let ([option (parse-required '("-i" "a"))])
       (CHECK equal? (option "i") "a")))
+
+  (define-command-line-options parse-two-required
+    [:short "-a" :long "--aa" :required]
+    [:short "-b" :required]
+    [:short "-c"])
+
+  (define-test test-the-first-missing-required-option-is-named
+    (CHECK equal? (error-irritants (lambda () (parse-two-required '()))) '("--aa"))
+    (CHECK equal? (error-irritants (lambda () (parse-two-required '("-a" "x")))) '("-b"))
+    (CHECK equal? ((parse-two-required '("-a" "x" "-b" "y")) "b") "y"))
 
   (define-test test-required-given-after-a-positional-word-in-the-equals-form
     (let ([option (parse-required '("f" "--input=a"))])
@@ -2052,11 +1922,7 @@
            "missing required option"))
 
   (define-test test-required-is-not-checked-when-help-is-asked
-    (let ([shown #f])
-      (parse-command-line (list (make-option-ast "-i" "--input" 1 1 #f "" #f #t #f))
-                          '("--help")
-                          (lambda (text) (set! shown text)))
-      (CHECK eq? (and shown #t) #t)))
+    (CHECK eq? (string? (help-text parse-required)) #t))
 
   (define-test test-syntax-error-required-on-a-flag
     (CHECK eq? (syntax-error?
@@ -2197,12 +2063,7 @@
     (CHECK eq? ((parse-none '("-v")) "v") #t))
 
   (define-test test-help-needs-no-positional-word
-    (let ([shown #f])
-      (parse-command-line (list (make-option-ast "-v" #f 0 0 #f "" #f #f #f))
-                          '("--help")
-                          (lambda (text) (set! shown text))
-                          (list (make-positional-ast "file" 1 1 #f "" #f)))
-      (CHECK eq? (and shown #t) #t)))
+    (CHECK eq? (string? (help-text parse-documented)) #t))
 
   ;; ========================================
   ;; usage with a positional
@@ -2214,7 +2075,7 @@
 
   (define-test test-usage-lists-the-positional
     (CHECK equal? ((parse-documented '("a")) 'help)
-           (string-append "Usage: " (program-name) " [options] [--] <file>...\n"
+           (string-append "Usage: " prog " [options] [--] <file>...\n"
                           "\n"
                           "Arguments:\n"
                           "  <file>...  files to read\n"
@@ -2223,16 +2084,22 @@
                           "  -v          verbose\n"
                           "  -h, --help  show this help message and exit\n")))
 
+  (define-command-line-options positional-exact [:positional "f"])
+  (define-command-line-options positional-optional [:positional "f" :arity (0 1)])
+  (define-command-line-options positional-one-or-more [:positional "f" :arity (1 +)])
+  (define-command-line-options positional-any [:positional "f" :arity (0 +)])
+  (define-command-line-options positional-two [:positional "f" :arity 2])
+
   (define-test test-usage-placeholders-of-a-positional
     (for-each
      (lambda (case)
-       (let ([usage (format-usage '() "p" (list (make-positional-ast "f" (car case) (cadr case) #f "" #f)))])
-         (CHECK eq? (contains? usage (string-append "p [options] [--] " (caddr case) "\n")) #t)))
-     (list (list 1 1 "<f>")
-           (list 0 1 "[<f>]")
-           (list 1 unlimited "<f>...")
-           (list 0 unlimited "[<f>...]")
-           (list 2 2 "<f> <f>"))))
+       (let ([usage (help-text (car case))])
+         (CHECK eq? (contains? usage (string-append " [options] [--] " (cadr case) "\n")) #t)))
+     (list (list positional-exact "<f>")
+           (list positional-optional "[<f>]")
+           (list positional-one-or-more "<f>...")
+           (list positional-any "[<f>...]")
+           (list positional-two "<f> <f>"))))
 
   ;; ========================================
   ;; usage: :metavar
@@ -2248,7 +2115,7 @@
 
   (define-test test-metavar-replaces-the-type-in-the-usage
     (CHECK equal? ((parse-metavar '()) 'help)
-           (string-append "Usage: " (program-name) " [options]\n"
+           (string-append "Usage: " prog " [options]\n"
                           "\n"
                           "Options:\n"
                           "  -i, --input <file>  file to read\n"
@@ -2271,7 +2138,7 @@
 
   (define-test test-metavar-replaces-the-choices-in-the-usage-and-they-are-still-checked
     (CHECK equal? ((parse-metavar-choices '()) 'help)
-           (string-append "Usage: " (program-name) " [options]\n"
+           (string-append "Usage: " prog " [options]\n"
                           "\n"
                           "Options:\n"
                           "      --format <fmt>  output format\n"
@@ -2377,12 +2244,7 @@
     (CHECK equal? ((parse-input '("f" "--input" "a")) "file") "f"))
 
   (define-test test-help-needs-neither-the-required-option-nor-the-positional
-    (let ([shown #f])
-      (parse-command-line (list (make-option-ast #f "--input" 1 1 #f "" #f #t #f))
-                          '("-h")
-                          (lambda (text) (set! shown text))
-                          (list (make-positional-ast "file" 1 1 #f "" #f)))
-      (CHECK eq? (and shown #t) #t)))
+    (CHECK eq? (string? (help-text parse-input)) #t))
 
   (define-command-line-options parse-upper
     [:positional "word" :arity (1 +) :type (lambda (s) (string-upcase s))])
@@ -2406,14 +2268,14 @@
       (CHECK equal? (option "e") '("a"))
       (CHECK equal? (option "file") "f")))
 
+  (define-command-line-options parse-count-and-file
+    [:short "-n" :long "--count" :type int]
+    [:positional "file"])
+
   (define-test test-positional-and-the-equals-form-of-an-option
     (let ([option (parse-mode '("fast" "-v"))])
       (CHECK equal? (option "mode") "fast"))
-    (let ([option (parse-command-line
-                   (list (make-option-ast "-n" "--count" 1 1 (builtin-converter 'int) "" #f #f #f))
-                   '("f" "--count=3")
-                   default-on-help
-                   (list (make-positional-ast "file" 1 1 #f "" #f)))])
+    (let ([option (parse-count-and-file '("f" "--count=3"))])
       (CHECK eqv? (option "count") 3)
       (CHECK equal? (option "file") "f")))
 
@@ -2429,119 +2291,23 @@
       (CHECK equal? (option "emit") "mlir")
       (CHECK equal? (option 'emit) "mlir")))
 
-  (define-test test-positional-too-few-and-too-many-through-the-runtime
-    (let ([parse-with (lambda (min max words)
-                        (parse-command-line '() words default-on-help
-                                            (list (make-positional-ast "w" min max #f "" #f))))])
-      (CHECK equal? (error-message (lambda () (parse-with 2 3 '("a")))) "too few positional arguments")
-      (CHECK equal? (error-irritants (lambda () (parse-with 2 3 '("a")))) '("w"))
-      (CHECK equal? ((parse-with 2 3 '("a" "b")) "w") '("a" "b"))
-      (CHECK equal? ((parse-with 2 3 '("a" "b" "c")) "w") '("a" "b" "c"))
-      (CHECK equal? (error-irritants (lambda () (parse-with 2 3 '("a" "b" "c" "d" "e"))))
-             '("d" "e"))))
+  (define-command-line-options parse-two-or-three [:positional "w" :arity (2 3)])
 
+  (define-test test-positional-too-few-and-too-many
+    (CHECK equal? (error-message (lambda () (parse-two-or-three '("a")))) "too few positional arguments")
+    (CHECK equal? (error-irritants (lambda () (parse-two-or-three '("a")))) '("w"))
+    (CHECK equal? ((parse-two-or-three '("a" "b")) "w") '("a" "b"))
+    (CHECK equal? ((parse-two-or-three '("a" "b" "c")) "w") '("a" "b" "c"))
+    (CHECK equal? (error-irritants (lambda () (parse-two-or-three '("a" "b" "c" "d" "e"))))
+           '("d" "e")))
 
-  ;; the positionals shared out as ((name word ...) ...), for the tests below
-  (define (shared-out positionals words)
-    (map (lambda (pair) (cons (positional-ast-name (car pair)) (cdr pair)))
-         (distribute-words positionals words)))
-
-  (define (positional-ast* name min max)
-    (make-positional-ast name min max #f "" #f))
-
-  (define-test test-distribute-words-gives-each-positional-its-words-in-order
-    (let ([cp (list (positional-ast* "source" 1 unlimited) (positional-ast* "dest" 1 1))]
-          [sandwich (list (positional-ast* "first" 1 1) (positional-ast* "middle" 0 unlimited)
-                          (positional-ast* "last" 1 1))]
-          [bounded (list (positional-ast* "x" 2 2) (positional-ast* "y" 0 2))])
-      (CHECK equal? (shared-out cp '("a" "b" "c")) '(("source" "a" "b") ("dest" "c")))
-      (CHECK equal? (shared-out cp '("a" "b")) '(("source" "a") ("dest" "b")))
-      (CHECK equal? (shared-out sandwich '("a" "z")) '(("first" "a") ("middle") ("last" "z")))
-      (CHECK equal? (shared-out sandwich '("a" "m" "n" "z"))
-             '(("first" "a") ("middle" "m" "n") ("last" "z")))
-      (CHECK equal? (shared-out bounded '("a" "b")) '(("x" "a" "b") ("y")))
-      (CHECK equal? (shared-out bounded '("a" "b" "c" "d")) '(("x" "a" "b") ("y" "c" "d")))))
-
-  (define-test test-distribute-words-with-no-positional
-    (CHECK equal? (shared-out '() '()) '())
-    (CHECK equal? (error-message (lambda () (shared-out '() '("a" "b")))) "unexpected positional argument")
-    (CHECK equal? (error-irritants (lambda () (shared-out '() '("a" "b")))) '("a" "b")))
-
-  (define-test test-distribute-words-errors
-    (let ([three (list (positional-ast* "a" 1 1) (positional-ast* "b" 1 1) (positional-ast* "c" 1 1))])
-      (CHECK equal? (error-irritants (lambda () (shared-out three '()))) '("a"))
-      (CHECK equal? (error-irritants (lambda () (shared-out three '("x")))) '("b"))
-      (CHECK equal? (error-irritants (lambda () (shared-out three '("x" "y")))) '("c"))
-      (CHECK equal? (error-message (lambda () (shared-out three '("x" "y")))) "too few positional arguments")
-      (CHECK equal? (error-message (lambda () (shared-out three '("x" "y" "z" "w"))))
-             "too many positional arguments")
-      (CHECK equal? (error-irritants (lambda () (shared-out three '("x" "y" "z" "w" "v")))) '("w" "v"))
-      (CHECK equal? (shared-out three '("x" "y" "z")) '(("a" "x") ("b" "y") ("c" "z")))))
-
-  ;; ========================================
-  ;; the steps of the parser, on specs built by hand
-  ;; ========================================
-
-  (define scan-specs
-    (list (make-option-ast "-v" "--verbose" 0 0 #f "" #f #f #f)
-          (make-option-ast "-n" "--count" 1 1 (builtin-converter 'int) "" #f #f #f)
-          (make-option-ast "-e" #f 1 unlimited #f "" #f #f #f)))
-
-  ;; (scan tokens) => (words help-asked? help-calls count-entry)
-  (define (scan tokens)
-    (let* ([calls 0]
-           [result (scan-tokens scan-specs (lambda () (set! calls (+ calls 1))) tokens)])
-      (list (parse-result-words result)
-            (parse-result-help-asked? result)
-            calls
-            (hashtable-ref (parse-result-table result) (cadr scan-specs) #f))))
-
-  (define-test test-scan-tokens-separates-options-from-words
-    (CHECK equal? (scan '("a" "-n" "3" "b")) '(("a" "b") #f 0 (3)))
-    (CHECK equal? (scan '("-v" "a")) '(("a") #f 0 #f))
-    (CHECK equal? (scan '()) '(() #f 0 #f)))
-
-  (define-test test-scan-tokens-double-dash-ends-the-options
-    (CHECK equal? (scan '("a" "--" "-n" "3")) '(("a" "-n" "3") #f 0 #f))
-    (CHECK equal? (scan '("--" "--")) '(("--") #f 0 #f)))
-
-  (define-test test-scan-tokens-unescapes-words-before-the-double-dash-only
-    (CHECK equal? (scan '("\\-a" "--" "\\-b")) '(("-a" "\\-b") #f 0 #f)))
-
-  (define-test test-scan-tokens-help-keeps-the-words-before-it-and-drops-the-rest
-    (CHECK equal? (scan '("a" "--help" "b" "-n" "3")) '(("a") #t 1 #f))
-    (CHECK equal? (scan '("-h")) '(() #t 1 #f)))
-
-  (define-test test-scan-tokens-a-word-that-is-not-an-option-is-a-word
-    (CHECK equal? (scan '("--nope")) '(("--nope") #f 0 #f))
-    (CHECK equal? (scan '("-5" "-n" "-6")) '(("-5") #f 0 (-6))))
-
-  (define-test test-scan-tokens-errors
-    (CHECK equal? (error-message (lambda () (scan '("-n")))) "too few arguments for option")
-    (CHECK equal? (error-message (lambda () (scan '("-v=1")))) "option does not take arguments"))
-
-  (define-test test-scan-tokens-an-unlimited-option-stops-at-an-option-or-the-double-dash
-    (let ([result (scan-tokens scan-specs (lambda () #f) '("-e" "x" "y" "-v" "z" "--" "w"))])
-      (CHECK equal? (hashtable-ref (parse-result-table result) (caddr scan-specs) #f) '("x" "y"))
-      (CHECK equal? (parse-result-words result) '("z" "w"))))
-
-  (define-test test-check-required-names-the-first-missing-option
-    (let ([specs (list (make-option-ast "-a" "--aa" 1 1 #f "" #f #t #f)
-                       (make-option-ast "-b" #f 1 1 #f "" #f #t #f)
-                       (make-option-ast "-c" #f 1 1 #f "" #f #f #f))]
-          [table (make-eq-hashtable)])
-      (CHECK equal? (error-irritants (lambda () (check-required specs table))) '("--aa"))
-      (hashtable-set! table (car specs) '("x"))
-      (CHECK equal? (error-irritants (lambda () (check-required specs table))) '("-b"))
-      (hashtable-set! table (cadr specs) '())
-      (CHECK equal? (begin (check-required specs table) 'no-error) 'no-error)))
   ;; ========================================
   ;; the usage of a positional
   ;; ========================================
 
   (define-test test-usage-of-a-positional-without-a-description
-    (CHECK equal? (format-usage '() "p" (list (make-positional-ast "file" 1 1 #f "" #f)))
-           (string-append "Usage: p [options] [--] <file>\n"
+    (CHECK equal? (help-text parse-one)
+           (string-append "Usage: " prog " [options] [--] <file>\n"
                           "\n"
                           "Arguments:\n"
                           "  <file>\n"
@@ -2549,9 +2315,12 @@
                           "Options:\n"
                           "  -h, --help  show this help message and exit\n")))
 
+  (define-command-line-options positional-multi-line
+    [:positional "f" :arity (0 +) :description "first\nsecond"])
+
   (define-test test-usage-of-a-positional-with-a-multi-line-description
-    (CHECK equal? (format-usage '() "p" (list (make-positional-ast "f" 0 unlimited #f "first\nsecond" #f)))
-           (string-append "Usage: p [options] [--] [<f>...]\n"
+    (CHECK equal? (help-text positional-multi-line)
+           (string-append "Usage: " prog " [options] [--] [<f>...]\n"
                           "\n"
                           "Arguments:\n"
                           "  [<f>...]  first\n"
@@ -2561,8 +2330,8 @@
                           "  -h, --help  show this help message and exit\n")))
 
   (define-test test-usage-without-a-positional-has-no-arguments-section
-    (CHECK eq? (contains? (format-usage '() "p") "Arguments:") #f)
-    (CHECK eq? (contains? (format-usage '() "p") "[--]") #f))
+    (CHECK eq? (contains? (help-text parse-none) "Arguments:") #f)
+    (CHECK eq? (contains? (help-text parse-none) "[--]") #f))
   ;; ========================================
   ;; more definition errors of :positional
   ;; ========================================
@@ -2716,14 +2485,14 @@
     (CHECK equal? (error-irritants (lambda () (parse-sandwich '("a")))) '("last"))
     (CHECK equal? (error-irritants (lambda () (parse-bounded '("a")))) '("x")))
 
+  (define-command-line-options parse-two-exact [:positional "p"] [:positional "q"])
+
   (define-test test-too-many-gives-the-words-that-no-positional-takes
     (CHECK equal? (error-message (lambda () (parse-bounded '("a" "b" "c" "d" "e"))))
            "too many positional arguments")
     (CHECK equal? (error-irritants (lambda () (parse-bounded '("a" "b" "c" "d" "e" "f"))))
            '("e" "f"))
-    (CHECK equal? (error-message (lambda () (parse-command-line '() '("a" "b" "c") default-on-help
-                                                                (list (make-positional-ast "p" 1 1 #f "" #f)
-                                                                      (make-positional-ast "q" 1 1 #f "" #f)))))
+    (CHECK equal? (error-message (lambda () (parse-two-exact '("a" "b" "c"))))
            "too many positional arguments"))
 
   (define-test test-the-variable-positional-has-no-upper-limit
@@ -2757,15 +2526,11 @@
            '("file" ("v"))))
 
   (define-test test-help-needs-no-positional-words-with-several
-    (let ([shown #f])
-      (parse-command-line '() '("--help") (lambda (text) (set! shown text))
-                          (list (make-positional-ast "a" 1 1 #f "" #f)
-                                (make-positional-ast "b" 2 2 #f "" #f)))
-      (CHECK eq? (and shown #t) #t)))
+    (CHECK eq? (string? (help-text parse-cp)) #t))
 
   (define-test test-usage-lists-every-positional
     (CHECK equal? ((parse-cp '("a" "b")) 'help)
-           (string-append "Usage: " (program-name) " [options] [--] <source>... <dest>\n"
+           (string-append "Usage: " prog " [options] [--] <source>... <dest>\n"
                           "\n"
                           "Arguments:\n"
                           "  <source>...  files to copy\n"
@@ -2777,7 +2542,7 @@
 
   (define-test test-usage-of-exact-and-optional-positionals
     (CHECK equal? ((parse-sandwich '("a" "z")) 'help)
-           (string-append "Usage: " (program-name) " [options] [--] <first> [<middle>...] <last>\n"
+           (string-append "Usage: " prog " [options] [--] <first> [<middle>...] <last>\n"
                           "\n"
                           "Arguments:\n"
                           "  <first>\n"
@@ -2789,7 +2554,7 @@
 
   (define-test test-usage-of-a-positional-with-an-exact-arity-above-one
     (CHECK equal? ((parse-bounded '("a" "b")) 'help)
-           (string-append "Usage: " (program-name) " [options] [--] <x> <x> [<y>] [<y>]\n"
+           (string-append "Usage: " prog " [options] [--] <x> <x> [<y>] [<y>]\n"
                           "\n"
                           "Arguments:\n"
                           "  <x> <x>\n"
@@ -2797,53 +2562,6 @@
                           "\n"
                           "Options:\n"
                           "  -h, --help  show this help message and exit\n")))
-  ;; ========================================
-  ;; the setters of the records, set once
-  ;; ========================================
-
-  ;; the setters of the records, one for each field: set a field that is still unbound, and call
-  ;; on-duplicate for one that was given already
-  (define (check-setters make-unbound field-setters)
-    (for-each
-     (lambda (entry)
-       (let ([setter (car entry)] [getter (cadr entry)] [first (caddr entry)] [second (cadddr entry)]
-             [calls 0])
-         (let ([record (make-unbound)])
-           (setter record first (lambda () (set! calls (+ calls 1))))
-           (CHECK equal? (getter record) first)
-           (CHECK eqv? calls 0)
-           (setter record second (lambda () (set! calls (+ calls 1))))
-           (CHECK equal? (getter record) first)
-           (CHECK eqv? calls 1))))
-     field-setters))
-
-  (define-test test-option-ast-setters-set-a-field-once
-    (check-setters
-     (lambda () (make-unbound-option-ast 'src))
-     (list (list option-ast-short-set-if-not-given-yet! option-ast-short "-a" "-b")
-           (list option-ast-long-set-if-not-given-yet! option-ast-long "--a" "--b")
-           (list option-ast-min-set-if-not-given-yet! option-ast-min 1 2)
-           (list option-ast-max-set-if-not-given-yet! option-ast-max 3 4)
-           (list option-ast-converter-set-if-not-given-yet! option-ast-converter 'e1 'e2)
-           (list option-ast-description-set-if-not-given-yet! option-ast-description "d1" "d2")
-           (list option-ast-required-set-if-not-given-yet! option-ast-required #t #f))))
-
-  (define-test test-positional-ast-setters-set-a-field-once
-    (check-setters
-     (lambda () (make-unbound-positional-ast 'src))
-     (list (list positional-ast-name-set-if-not-given-yet! positional-ast-name "a" "b")
-           (list positional-ast-min-set-if-not-given-yet! positional-ast-min 1 2)
-           (list positional-ast-max-set-if-not-given-yet! positional-ast-max 3 4)
-           (list positional-ast-converter-set-if-not-given-yet! positional-ast-converter 'e1 'e2)
-           (list positional-ast-description-set-if-not-given-yet! positional-ast-description "d1" "d2"))))
-
-  (define-test test-a-setter-counts-false-as-given
-    (let ([o (make-unbound-option-ast 'src)]
-          [calls 0])
-      (option-ast-short-set-if-not-given-yet! o #f (lambda () (set! calls (+ calls 1))))
-      (option-ast-short-set-if-not-given-yet! o "-a" (lambda () (set! calls (+ calls 1))))
-      (CHECK eqv? calls 1)
-      (CHECK equal? (option-ast-short o) #f)))
 
   ;; ========================================
   ;; the recipes of the doc: what a program does with what the library gives

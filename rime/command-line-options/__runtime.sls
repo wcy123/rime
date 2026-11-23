@@ -4,32 +4,14 @@
 ;; and prints the usage.
 (library (rime command-line-options __runtime)
   (export parse-command-line
-          scan-tokens
-          parse-result-table
-          parse-result-words
-          parse-result-help-asked?
-          distribute-words
-          check-required
           parse-or-exit
           command-line-error?
           command-line-error-usage
-          format-command-line-error
-          describe-problem
-          format-usage
-          program-name
-          program-name-of
           default-on-help
           builtin-converters
           builtin-converter
           make-choice-converter
-          procedure->converter
-          make-converter
-          converter-label
-          converter-convert
-          convert-bool
-          convert-int
-          convert-float
-          convert-string)
+          procedure->converter)
   (import (rnrs (6))
           (rime command-line-options __ast))
 
@@ -47,26 +29,23 @@
   ;;   store-positional-words! convert them and put them in the table
   ;; parse-command-line calls them in this order and builds the accessor.
 
-  ;; (parse-command-line specs args [on-help [positionals]]) => the accessor
+  ;; (parse-command-line specs args on-help positionals) => the accessor
+  ;;   on-help: called with the usage text at -h and --help
   ;;   positionals: list of positional-ast, '() when the command line takes no positional words
-  (define parse-command-line
-    (case-lambda
-      [(specs args) (parse-command-line specs args default-on-help '())]
-      [(specs args on-help) (parse-command-line specs args on-help '())]
-      [(specs args on-help positionals)
-       ;; the library's own failures leave here with the usage of this parser attached
-       (with-usage
-        (lambda () (format-usage specs (program-name) positionals))
-        (lambda ()
-          (let* ([result (scan-tokens specs
-                                      (lambda () (on-help (format-usage specs (program-name) positionals)))
-                                      args)]
-                 [table (parse-result-table result)])
-            (unless (parse-result-help-asked? result)
-              (check-required specs table)
-              (check-collected specs table)
-              (store-positional-words! table (distribute-words positionals (parse-result-words result))))
-            (make-accessor specs positionals table))))]))
+  (define (parse-command-line specs args on-help positionals)
+    ;; the library's own failures leave here with the usage of this parser attached
+    (with-usage
+     (lambda () (format-usage specs (program-name) positionals))
+     (lambda ()
+       (let* ([result (scan-tokens specs
+                                   (lambda () (on-help (format-usage specs (program-name) positionals)))
+                                   args)]
+              [table (parse-result-table result)])
+         (unless (parse-result-help-asked? result)
+           (check-required specs table)
+           (check-collected specs table)
+           (store-positional-words! table (distribute-words positionals (parse-result-words result))))
+         (make-accessor specs positionals table)))))
 
   ;; table          option-ast or positional-ast -> the converted arguments, of what was given
   ;; words          the positional words, in order, the ones before -- unescaped
@@ -299,44 +278,40 @@
             [(member name (option-lookup-names (car specs))) (car specs)]
             [else (loop (cdr specs))])))
 
-  (define (program-name) (program-name-of (command-line)))
-
-  ;; (program-name-of command-line) => the first element of a (command-line), or "program" when
-  ;; there is none: (command-line) is ("") when there is no script, in a REPL or with --eval
-  (define (program-name-of command-line)
-    (if (and (pair? command-line) (string? (car command-line)) (not (string=? (car command-line) "")))
-        (car command-line)
-        "program"))
+  ;; the first element of (command-line), or "program" when there is none: (command-line) is ("")
+  ;; when there is no script, in a REPL or with --eval
+  (define (program-name)
+    (let ([line (command-line)])
+      (if (and (pair? line) (string? (car line)) (not (string=? (car line) "")))
+          (car line)
+          "program")))
 
   ;; ========================================
   ;; usage
   ;; ========================================
 
-  ;; (format-usage specs program [positionals]) => the usage text
-  (define format-usage
-    (case-lambda
-      [(specs program) (format-usage specs program '())]
-      [(specs program positionals)
-       (let ([specs (append specs (list help-spec))])
-         (string-append
-          "Usage: " program " [options]"
-          (if (null? positionals)
-              ""
-              (string-append " [--] " (join (map positional-placeholder positionals) " ")))
-          "\n"
-          (if (null? positionals)
-              ""
-              (string-append
-               "\n"
-               "Arguments:\n"
-               (format-rows (map (lambda (positional)
-                                   (cons (positional-placeholder positional)
-                                         (positional-ast-description positional)))
-                                 positionals))))
-          "\n"
-          "Options:\n"
-          (format-rows (map (lambda (spec) (cons (flags spec) (option-ast-description spec)))
-                            specs))))]))
+  ;; (format-usage specs program positionals) => the usage text
+  (define (format-usage specs program positionals)
+    (let ([specs (append specs (list help-spec))])
+      (string-append
+       "Usage: " program " [options]"
+       (if (null? positionals)
+           ""
+           (string-append " [--] " (join (map positional-placeholder positionals) " ")))
+       "\n"
+       (if (null? positionals)
+           ""
+           (string-append
+            "\n"
+            "Arguments:\n"
+            (format-rows (map (lambda (positional)
+                                (cons (positional-placeholder positional)
+                                      (positional-ast-description positional)))
+                              positionals))))
+       "\n"
+       "Options:\n"
+       (format-rows (map (lambda (spec) (cons (flags spec) (option-ast-description spec)))
+                         specs)))))
 
   ;; rows is a list of (label . description); the descriptions line up, a multi-line description is
   ;; indented under its first line
