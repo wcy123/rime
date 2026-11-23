@@ -12,7 +12,6 @@
           option-ast-max
           option-ast-converter
           option-ast-description
-          option-ast-source
           option-ast-required
           option-ast-short-set-if-not-given-yet!
           option-ast-long-set-if-not-given-yet!
@@ -33,7 +32,6 @@
           positional-ast-max
           positional-ast-converter
           positional-ast-description
-          positional-ast-source
           positional-ast-name-set-if-not-given-yet!
           positional-ast-min-set-if-not-given-yet!
           positional-ast-max-set-if-not-given-yet!
@@ -46,8 +44,17 @@
           option-ast-fill-defaults!
           check-options
           check-positionals)
-  (import (rnrs (6))
-          (for (rnrs (6)) expand))
+  (import (only (rnrs (6))
+                + < > and append begin car cdr char-whitespace? char=? cond cons define
+                define-syntax else eq? eqv? exists for-all for-each greatest-fixnum if lambda let
+                let* list member not null? or quote string->list string-length string-ref string=?
+                substring unless when)
+          (for (only (rnrs (6))
+                     ... _ datum->syntax define lambda let map string->symbol string-append
+                     symbol->string syntax syntax->datum syntax-case with-syntax)
+               expand)
+          ;; whole library: Guile's (rnrs (6)) has no `fields` or `mutable`, so no `only` list
+          (rnrs records syntactic (6)))
 
   ;; the value of a field that has not been set yet; not #f, which is a value
   (define unbound (list 'unbound))

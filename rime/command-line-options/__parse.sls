@@ -7,11 +7,26 @@
 ;; This library is imported `for expand`.
 (library (rime command-line-options __parse)
   (export parse-options)
-  (import (rnrs (6))
-          (rime command-line-options __keywords)
-          (rime command-line-options __ast)
+  (import (only (rnrs (6))
+                + ... >= _ and assq begin car cdr cond cons datum->syntax define else exact? filter
+                for-all if integer? lambda let let* let-values member null? or quote string-append
+                string? symbol->string symbol? syntax syntax->datum syntax-case syntax-violation
+                values when with-syntax)
+          (only (rime command-line-options __keywords)
+                :arity :choices :description :long :metavar :positional :required :short :type)
+          (only (rime command-line-options __ast)
+                check-options check-positionals make-unbound-option-ast make-unbound-positional-ast
+                option-ast-converter-set-if-not-given-yet!
+                option-ast-description-set-if-not-given-yet! option-ast-fill-defaults!
+                option-ast-long-set-if-not-given-yet! option-ast-max-set-if-not-given-yet!
+                option-ast-metavar-set-if-not-given-yet! option-ast-min-set-if-not-given-yet!
+                option-ast-required-set-if-not-given-yet! option-ast-short-set-if-not-given-yet!
+                option-ast? positional-ast-converter-set-if-not-given-yet!
+                positional-ast-description-set-if-not-given-yet! positional-ast-fill-defaults!
+                positional-ast-max-set-if-not-given-yet! positional-ast-min-set-if-not-given-yet!
+                positional-ast-name-set-if-not-given-yet! positional-ast? unlimited)
           (only (rime command-line-options __runtime)
-                builtin-converters builtin-converter make-choice-converter procedure->converter))
+                builtin-converter builtin-converters make-choice-converter procedure->converter))
 
   ;; (parse-options clauses) => (values options positionals)
   ;;   input   clauses: the syntax of `clause ...` in (define-command-line-options parser clause ...),
