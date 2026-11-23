@@ -244,9 +244,9 @@
     (syntax-case whole ()
       [() (violation ":choices needs at least one choice" whole)]
       [(choice0 choice1 ...) (for-all string? (syntax->datum whole))
-       (read-distinct whole)]
+       (distinct-datums whole)]
       [(choice0 choice1 ...) (for-all integer-choice? (syntax->datum whole))
-       (read-distinct whole)]
+       (distinct-datums whole)]
       [(choice0 choice1 ...) (for-all choice? (syntax->datum whole))
        (violation ":choices must be all strings or all integers" whole)]
       [(choice0 choice1 ...)
@@ -259,16 +259,17 @@
   (define (choice? datum)
     (or (string? datum) (integer-choice? datum)))
 
-  ;; the datums of the list `whole`; `seen` are those before, the latest first
-  (define (read-distinct whole)
-    (let loop ([rest whole] [seen '()])
-      (syntax-case rest ()
-        [() (reverse seen)]
-        [(choice . more)
-         (let ([datum (syntax->datum #'choice)])
-           (when (member datum seen)
-             (violation "duplicate choice" #'choice))
-           (loop #'more (cons datum seen)))])))
+  ;; the datums of the list `whole`, when no two of them are the same
+  (define (distinct-datums whole)
+    (let ([datums (syntax->datum whole)])
+      (when (has-duplicate? datums)
+        (violation "duplicate choice" whole))
+      datums))
+
+  (define (has-duplicate? items)
+    (cond [(null? items) #f]
+          [(member (car items) (cdr items)) #t]
+          [else (has-duplicate? (cdr items))]))
 
   (define (read-description form)
     (if (string? (syntax->datum form))
