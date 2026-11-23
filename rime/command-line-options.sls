@@ -3,13 +3,16 @@
   (export define-command-line-options
           parse-or-exit command-line-error? command-line-error-usage
           :short :long :arity :type :choices :description :required :positional :metavar)
-  (import (rnrs (6))
-          (for (rnrs (6)) expand)
-          (for (rime command-line-options __parse) expand)
-          (for (rime command-line-options __codegen) expand)
-          (rime command-line-options __keywords)
+  (import (only (rnrs (6)) define-syntax)
+          (for (only (rnrs (6))
+                     ... _ identifier? lambda let-values quote syntax syntax-case syntax-violation)
+               expand)
+          (for (only (rime command-line-options __parse) parse-options) expand)
+          (for (only (rime command-line-options __codegen) generate-definition) expand)
+          (only (rime command-line-options __keywords)
+                :arity :choices :description :long :metavar :positional :required :short :type)
           (only (rime command-line-options __runtime)
-                parse-or-exit command-line-error? command-line-error-usage))
+                command-line-error-usage command-line-error? parse-or-exit))
 
   ;; (define-command-line-options parser clause ...)
   ;;   clause = [field ...]

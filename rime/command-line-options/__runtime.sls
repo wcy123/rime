@@ -11,8 +11,25 @@
           builtin-converter
           make-choice-converter
           procedure->converter)
-  (import (rnrs (6))
-          (rime command-line-options __ast))
+  (import (only (rnrs (6))
+                &error + - < = => > and append apply assq caddr cadr call-with-string-output-port
+                car case-lambda cdr char-whitespace? char=? command-line cond condition
+                condition-irritants condition-message cons current-error-port define
+                define-condition-type display else equal? error exact? exists exit fixnum? for-all
+                for-each guard hashtable-contains? hashtable-ref hashtable-set! if inexact integer?
+                lambda length let let* let-values list list-tail list? make-eq-hashtable make-error
+                make-irritants-condition make-message-condition make-string make-who-condition map
+                max member not null? number->string or pair? quote raise real? reverse string->list
+                string->number string-append string-downcase string-length string-ref string=?
+                string? substring symbol->string symbol? unless values when write)
+          ;; whole library: Guile's (rnrs (6)) has no `fields` or `mutable`, so no `only` list
+          (rnrs records syntactic (6))
+          (only (rime command-line-options __ast)
+                make-option-ast option-ast-converter option-ast-description option-ast-long
+                option-ast-max option-ast-metavar option-ast-min option-ast-required
+                option-ast-short option-lookup-names positional-ast-converter
+                positional-ast-description positional-ast-max positional-ast-min
+                positional-ast-name positional-ast? unbound unbound? unlimited))
 
   (define help-spec
     (make-option-ast "-h" "--help" 0 0 #f "show this help message and exit" #f #f #f))
