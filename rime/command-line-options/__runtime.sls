@@ -165,14 +165,15 @@
   ;; same). Following words are not consumed, so an option that takes a variable number of arguments
   ;; can be stopped, and an option that needs two or more cannot use =.
   (define (parse-option specs table token rest)
-    (let* ([equals (index-of #\= token)]
-           [name (if equals (substring token 0 equals) token)]
+    (let* ([equal-sign-index (index-of #\= token)]
+           [name (if equal-sign-index (substring token 0 equal-sign-index) token)]
            [spec (find-spec-by-token specs name)])
       (cond
-       [equals
+       [equal-sign-index
         (when (= 0 (option-ast-max spec))
           (fail table "option does not take arguments" name))
-        (store! table spec name (list (substring token (+ equals 1) (string-length token))))
+        (store! table spec name
+                (list (substring token (+ equal-sign-index 1) (string-length token))))
         rest]
        [else
         (let-values ([(items remaining) (take-arguments specs rest (option-ast-max spec))])
@@ -554,9 +555,12 @@
   ;; An option that is named like a value, say -5, cannot be given as that value; write it after --,
   ;; after =, or with the escape.
   (define (option-like? token specs)
-    (let ([equals (index-of #\= token)])
+    (let ([equal-sign-index (index-of #\= token)])
       (or (and (member token '("-h" "--help")) #t)
-          (and (find-spec-by-token specs (if equals (substring token 0 equals) token)) #t))))
+          (and (find-spec-by-token specs (if equal-sign-index
+                                             (substring token 0 equal-sign-index)
+                                             token))
+               #t))))
 
   ;; "\-x" is the way to pass "-x" as a value
   (define (unescape token)
