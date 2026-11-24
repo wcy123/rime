@@ -165,15 +165,14 @@
   ;; same). Following words are not consumed, so an option that takes a variable number of arguments
   ;; can be stopped, and an option that needs two or more cannot use =.
   (define (parse-option specs table token rest)
-    (let* ([equal-sign-index (index-of #\= token)]
-           [name (if equal-sign-index (substring token 0 equal-sign-index) token)]
+    (let* ([name (token-name token)]
+           [text (token-text token)]
            [spec (find-spec-by-token specs name)])
       (cond
-       [equal-sign-index
+       [text
         (when (= 0 (option-ast-max spec))
           (fail table "option does not take arguments" name))
-        (store! table spec name
-                (list (substring token (+ equal-sign-index 1) (string-length token))))
+        (store! table spec name (list text))
         rest]
        [else
         (let-values ([(items remaining) (take-arguments specs rest (option-ast-max spec))])
@@ -555,12 +554,21 @@
   ;; An option that is named like a value, say -5, cannot be given as that value; write it after --,
   ;; after =, or with the escape.
   (define (option-like? token specs)
+    (or (and (member token '("-h" "--help")) #t)
+        (and (find-spec-by-token specs (token-name token)) #t)))
+
+  ;; the name in a token: "--count" for "--count=3" and for "--count"
+  (define (token-name token)
     (let ([equal-sign-index (index-of #\= token)])
-      (or (and (member token '("-h" "--help")) #t)
-          (and (find-spec-by-token specs (if equal-sign-index
-                                             (substring token 0 equal-sign-index)
-                                             token))
-               #t))))
+      (if equal-sign-index
+          (substring token 0 equal-sign-index)
+          token)))
+
+  ;; the text after the = in a token: "3" for "--count=3", "" for "--count=", #f for "--count"
+  (define (token-text token)
+    (let ([equal-sign-index (index-of #\= token)])
+      (and equal-sign-index
+           (substring token (+ equal-sign-index 1) (string-length token)))))
 
   ;; "\-x" is the way to pass "-x" as a value
   (define (unescape token)
