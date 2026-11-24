@@ -1157,10 +1157,12 @@ The exported macro is just those two calls.
 | `__ast.sls`                         | the `option-ast` and `positional-ast` records, and the semantic rules (names, arity, converter, duplicates) |
 | `__codegen.sls`                     | phase 2, write: generates the definition, which builds the same records again at runtime; never reads user syntax |
 | `__keywords.sls`                    | the field keywords `:short :long :arity :type :choices :description :required :positional :metavar` |
-| `__runtime.sls`                      | the runtime: parses the command line, builds the accessor, prints the usage; the `&command-line-error` condition and `parse-or-exit`; the builtin converters |
+| `__converter.sls`                   | the `converter` record: a label for the usage and a conversion that raises its own error |
+| `__format-usage.sls`                | the usage text from the option and positional records, `(format-usage specs program positionals)` |
+| `__runtime.sls`                      | the runtime: parses the command line, builds the accessor; the `&command-line-error` condition and `parse-or-exit`; the builtin converters |
 
-A converter is an object with a label for the usage and a conversion that raises its own error, so the
-runtime does not know which kinds there are. Adding a kind of converter means one constructor in
+A converter (`__converter.sls`) is an object with a label for the usage and a conversion that raises its own
+error, so the runtime does not know which kinds there are. Adding a kind of converter means one constructor in
 `__runtime.sls` (like `make-choice-converter`); a builtin type is also an entry in `builtin-converters`.
 Adding a field to the clause syntax means a keyword in `__keywords.sls` and a pattern in `__parse.sls`,
 a field in the record and a rule in `__ast.sls` if it has one, and a line in `__codegen.sls`.

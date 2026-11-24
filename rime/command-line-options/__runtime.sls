@@ -1,7 +1,7 @@
 #!r6rs
 ;; The runtime of define-command-line-options: what runs in the user's program. Parses the
 ;; command line against the options (option-ast records, see __ast.sls), builds the accessor,
-;; and prints the usage.
+;; and builds the usage with __format-usage.sls.
 (library (rime command-line-options __runtime)
   (export parse-command-line
           parse-or-exit
@@ -18,20 +18,21 @@
                 define-condition-type display else equal? error exact? exists exit fixnum? for-all
                 for-each guard hashtable-contains? hashtable-ref hashtable-set! if inexact integer?
                 lambda length let let* let-values list list-tail list? make-eq-hashtable make-error
-                make-irritants-condition make-message-condition make-string make-who-condition map
-                max member not null? number->string or pair? quote raise real? reverse string->list
-                string->number string-append string-downcase string-length string-ref string=?
-                string? substring symbol->string symbol? unless values when write)
+                make-irritants-condition make-message-condition make-who-condition map member not
+                null? number->string or pair? quote raise real? reverse string->list string->number
+                string-append string-downcase string-length string-ref string=? string? substring
+                symbol->string symbol? unless values when write)
           ;; whole library: Guile's (rnrs (6)) has no `fields` or `mutable`, so no `only` list
           (rnrs records syntactic (6))
-          (only (rime loop)
-                := :below :break :collect :for :from :if :in :in-string :initially :repeat loop)
+          (only (rime loop) := :below :break :collect :for :from :if :in :in-string :initially loop)
+          (only (rime string __string-join) string-join)
+          (only (rime command-line-options __converter) converter-convert make-converter)
+          (only (rime command-line-options __format-usage) format-usage)
           (only (rime command-line-options __ast)
-                make-option-ast option-ast-converter option-ast-description option-ast-long
-                option-ast-max option-ast-metavar option-ast-min option-ast-required
-                option-ast-short option-lookup-names positional-ast-converter
-                positional-ast-description positional-ast-max positional-ast-min
-                positional-ast-name positional-ast? unbound unbound? unlimited))
+                make-option-ast option-ast-converter option-ast-long option-ast-max option-ast-min
+                option-ast-required option-ast-short option-lookup-names positional-ast-converter
+                positional-ast-max positional-ast-min positional-ast-name positional-ast? unbound
+                unbound?))
 
   (define help-spec
     (make-option-ast "-h" "--help" 0 0 #f "show this help message and exit" #f #f #f))
@@ -106,7 +107,7 @@
   ;;;   => error: invalid argument value ("-n" "x")
   ;;; @endcode
   (define (parse-command-line specs args positionals)
-    (let* ([usage (format-usage specs (program-name) positionals)]
+    (let* ([usage (format-usage (append specs (list help-spec)) (program-name) positionals)]
            [result (scan-tokens specs args usage)]
            [table (parse-result-table result)])
       (unless (hashtable-contains? table help-spec)
@@ -439,112 +440,6 @@
           "program")))
 
   ;; ========================================
-  ;; usage
-  ;; ========================================
-
-  ;; (format-usage specs program positionals) => the usage text
-  (define (format-usage specs program positionals)
-    (let ([specs (append specs (list help-spec))])
-      (string-append
-       "Usage: " program " [options]"
-       (if (null? positionals)
-           ""
-           (string-append " [--] " (join (map positional-placeholder positionals) " ")))
-       "\n"
-       (if (null? positionals)
-           ""
-           (string-append
-            "\n"
-            "Arguments:\n"
-            (format-rows (map (lambda (positional)
-                                (cons (positional-placeholder positional)
-                                      (positional-ast-description positional)))
-                              positionals))))
-       "\n"
-       "Options:\n"
-       (format-rows (map (lambda (spec) (cons (flags spec) (option-ast-description spec)))
-                         specs)))))
-
-  ;; rows is a list of (label . description); the descriptions line up, a multi-line description is
-  ;; indented under its first line
-  (define (format-rows rows)
-    (let* ([width (apply max (map (lambda (row) (string-length (car row))) rows))]
-           [indent 2]
-           [gap 2]
-           [column (+ indent width gap)])
-      (define (format-row row)
-        (let ([label (car row)]
-              [lines (split-lines (cdr row))])
-          (string-append
-           (spaces indent)
-           (if (string=? (car lines) "")
-               label
-               (string-append label
-                              (spaces (+ (- width (string-length label)) gap))
-                              (car lines)))
-           "\n"
-           (apply string-append
-                  (map (lambda (line) (string-append (spaces column) line "\n"))
-                       (cdr lines))))))
-      (define (spaces n) (make-string n #\space))
-      (apply string-append (map format-row rows))))
-
-  ;; "-n, --count <int>"; a long name alone is indented so that long names line up
-  (define (flags spec)
-    (let ([names (cond [(and (option-ast-short spec) (option-ast-long spec))
-                        (string-append (option-ast-short spec) ", " (option-ast-long spec))]
-                       [(option-ast-short spec) (option-ast-short spec)]
-                       [else (string-append "    " (option-ast-long spec))])]
-          [arguments (placeholder spec)])
-      (if (string=? arguments "")
-          names
-          (string-append names " " arguments))))
-
-  ;; "<int>", "{json,text}", or the <metavar> when the option has one
-  (define (placeholder spec)
-    (placeholder-of (option-ast-min spec) (option-ast-max spec)
-                    (if (option-ast-metavar spec)
-                        (string-append "<" (option-ast-metavar spec) ">")
-                        (converter-label (spec-converter spec)))))
-
-  ;; "<file>...", "[<file>]": how many words, shown with the name of the positional
-  (define (positional-placeholder positional)
-    (placeholder-of (positional-ast-min positional) (positional-ast-max positional)
-                    (string-append "<" (positional-ast-name positional) ">")))
-
-  ;; the placeholder of `arg` for min to max arguments
-  (define (placeholder-of min max arg)
-    (let ([mandatory (repeat min arg)])
-      (join
-       (cond
-        [(and (= max unlimited) (= min 0))
-         (list (string-append "[" arg "...]"))]
-        [(= max unlimited)
-         (append (repeat (- min 1) arg) (list (string-append arg "...")))]
-        [else
-         (append mandatory (repeat (- max min) (string-append "[" arg "]")))])
-       " ")))
-
-  (define (repeat n x)
-    (loop :repeat n :collect x))
-
-  (define (join strings separator)
-    (if (null? strings)
-        ""
-        (let loop ([result (car strings)] [rest (cdr strings)])
-          (if (null? rest)
-              result
-              (loop (string-append result separator (car rest)) (cdr rest))))))
-
-  (define (split-lines string)
-    (let loop ([i 0] [start 0] [lines '()])
-      (cond [(= i (string-length string))
-             (reverse (cons (substring string start i) lines))]
-            [(char=? (string-ref string i) #\newline)
-             (loop (+ i 1) (+ i 1) (cons (substring string start i) lines))]
-            [else (loop (+ i 1) start lines)])))
-
-  ;; ========================================
   ;; tokens
   ;; ========================================
 
@@ -590,15 +485,6 @@
   ;; converters, from the text of an argument to a value
   ;; ========================================
 
-  ;; A converter turns the text of an argument into a value, and it deals with everything about that:
-  ;;   label    how an argument is shown in the usage: "<int>", "{json,text}"
-  ;;   convert  (convert text option-name table) => the value; when the text does not suit, it raises
-  ;;            the error the user sees with (fail table ...), so each kind of converter has its own
-  ;;            failure
-  ;; The runtime only uses these two, it does not know which kinds of converter there are.
-  (define-record-type converter
-    (fields label convert))
-
   ;; the converter of an option; no converter means the text as it is
   (define (spec-converter spec)
     (or (if (positional-ast? spec) (positional-ast-converter spec) (option-ast-converter spec))
@@ -620,7 +506,7 @@
   ;; usual text and the value is the choice itself
   (define (make-choice-converter choices)
     (make-converter
-     (string-append "{" (join (map choice->text choices) ",") "}")
+     (string-append "{" (string-join "," (map choice->text choices)) "}")
      (lambda (text name table)
        (or (loop :initially := #f
                  :for choice :in choices
@@ -697,7 +583,7 @@
           (condition-message e)
           (if (null? (condition-irritants e))
               ""
-              (string-append ": " (join (map write->string (condition-irritants e)) " ")))))
+              (string-append ": " (string-join " " (map write->string (condition-irritants e)))))))
      "\n\n"
      (or (command-line-error-usage e) "")))
 
@@ -712,7 +598,7 @@
       (if (and (string? w) (> (string-length w) 0) (not (exists char-whitespace? (string->list w))))
           w
           (write->string w)))
-    (define (words ws) (join (map word ws) " "))
+    (define (words ws) (string-join " " (map word ws)))
     (define (choice-text c) (if (string? c) c (number->string c)))
     (define (all-strings? ds) (for-all string? ds))
     (cond
@@ -721,7 +607,7 @@
      [(and (is? "argument must be one of the choices") (= 3 (length details))
            (string? (car details)) (string? (cadr details)) (list? (caddr details)))
       (string-append (write->string (cadr details)) " is not one of "
-                     (join (map choice-text (caddr details)) ", ")
+                     (string-join ", " (map choice-text (caddr details)))
                      " (for " (car details) ")")]
      [(and (is? "too few arguments for option") (= 1 (length details)) (all-strings? details))
       (string-append "too few arguments for " (car details))]
