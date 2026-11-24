@@ -24,7 +24,8 @@
                 string? substring symbol->string symbol? unless values when write)
           ;; whole library: Guile's (rnrs (6)) has no `fields` or `mutable`, so no `only` list
           (rnrs records syntactic (6))
-          (only (rime loop) := :break :for :from :if :in :in-string :initially loop)
+          (only (rime loop)
+                := :below :break :collect :for :from :if :in :in-string :initially :repeat loop)
           (only (rime command-line-options __ast)
                 make-option-ast option-ast-converter option-ast-description option-ast-long
                 option-ast-max option-ast-metavar option-ast-min option-ast-required
@@ -309,10 +310,11 @@
 
   (define (sum numbers) (apply + numbers))
 
-  (define (list-head list count)
-    (if (= count 0)
-        '()
-        (cons (car list) (list-head (cdr list) (- count 1)))))
+  ;; the first `count` elements of `items`
+  (define (list-head items count)
+    (loop :for item :in items
+          :for i :from 0 :below count
+          :collect item))
 
   ;;; @brief Checks that every `:required` option is in the table.
   ;;; @param specs  list of option-ast
@@ -524,7 +526,7 @@
        " ")))
 
   (define (repeat n x)
-    (if (= n 0) '() (cons x (repeat (- n 1) x))))
+    (loop :repeat n :collect x))
 
   (define (join strings separator)
     (if (null? strings)
@@ -620,11 +622,10 @@
     (make-converter
      (string-append "{" (join (map choice->text choices) ",") "}")
      (lambda (text name table)
-       (let loop ([rest choices])
-         (cond [(null? rest)
-                (fail table "argument must be one of the choices" name text choices)]
-               [(string=? (choice->text (car rest)) text) (car rest)]
-               [else (loop (cdr rest))])))))
+       (or (loop :initially := #f
+                 :for choice :in choices
+                 :break choice :if (string=? (choice->text choice) text))
+           (fail table "argument must be one of the choices" name text choices)))))
 
   (define (choice->text choice)
     (if (string? choice) choice (number->string choice)))
