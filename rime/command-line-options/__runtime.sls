@@ -24,6 +24,7 @@
                 string? substring symbol->string symbol? unless values when write)
           ;; whole library: Guile's (rnrs (6)) has no `fields` or `mutable`, so no `only` list
           (rnrs records syntactic (6))
+          (only (rime loop) := :break :for :from :if :in :in-string :initially loop)
           (only (rime command-line-options __ast)
                 make-option-ast option-ast-converter option-ast-description option-ast-long
                 option-ast-max option-ast-metavar option-ast-min option-ast-required
@@ -408,27 +409,24 @@
      [(and (= 1 min) (= 1 max)) (and items (car items))]
      [else (or items '())]))
 
-  ;; "-n" or "--count", as written on the command line
+  ;; the option that has the name `token`, "-n" or "--count" as written on the command line, or #f
   (define (find-spec-by-token specs token)
-    (let loop ([specs specs])
-      (cond [(null? specs) #f]
-            [(or (equal? (option-ast-short (car specs)) token)
-                 (equal? (option-ast-long (car specs)) token))
-             (car specs)]
-            [else (loop (cdr specs))])))
+    (loop :initially := #f
+          :for spec :in specs
+          :break spec :if (or (equal? (option-ast-short spec) token)
+                              (equal? (option-ast-long spec) token))))
 
+  ;; the positional that has the name `name`, or #f
   (define (find-positional positionals name)
-    (let loop ([positionals positionals])
-      (cond [(null? positionals) #f]
-            [(string=? (positional-ast-name (car positionals)) name) (car positionals)]
-            [else (loop (cdr positionals))])))
+    (loop :initially := #f
+          :for positional :in positionals
+          :break positional :if (string=? (positional-ast-name positional) name)))
 
-  ;; "n" or "count", the name without the dashes
+  ;; the option that has the name `name`, "n" or "count", the name without the dashes, or #f
   (define (find-spec-by-name specs name)
-    (let loop ([specs specs])
-      (cond [(null? specs) #f]
-            [(member name (option-lookup-names (car specs))) (car specs)]
-            [else (loop (cdr specs))])))
+    (loop :initially := #f
+          :for spec :in specs
+          :break spec :if (member name (option-lookup-names spec))))
 
   ;; the first element of (command-line), or "program" when there is none: (command-line) is ("")
   ;; when there is no script, in a REPL or with --eval
@@ -578,11 +576,12 @@
         (substring token 1 (string-length token))
         token))
 
+  ;; the position of the first `char` in `string`, or #f
   (define (index-of char string)
-    (let loop ([i 0])
-      (cond [(= i (string-length string)) #f]
-            [(char=? (string-ref string i) char) i]
-            [else (loop (+ i 1))])))
+    (loop :initially := #f
+          :for c :in-string string
+          :for i :from 0
+          :break i :if (char=? c char)))
 
 
   ;; ========================================
